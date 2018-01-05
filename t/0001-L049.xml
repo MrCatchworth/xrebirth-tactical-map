@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<language id="49">
+    <!-- 305336 is my egosoft forum ID -->
+    <page id="30533601" title="Tactical Map" descr="General strings used by tactical map mod" voice="no">
+        <t id="1001">%s von %s</t>
+    </page>
+</language>
