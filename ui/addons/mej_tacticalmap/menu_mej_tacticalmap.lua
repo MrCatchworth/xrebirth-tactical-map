@@ -98,7 +98,6 @@ end
 local colorChar = string.char(27)
 
 local function loadOrdersFromExtensions()
-    --DebugError("TACTICAL MAP: LOADING ORDERS DEFINED IN EXTENSIONS")
     local extensions = GetExtensionList()
     
     for k, extension in ipairs(extensions) do
@@ -165,8 +164,16 @@ function menu.concatHistory(sep)
 end
 
 function menu.onShowMenu()
-    Helper.standardFontSize = 9
-    Helper.standardTextHeight = 14
+    --be a bit chunkier if the detailmonitor is small
+    menu.lowResMode = not Helper.largePDA
+    
+    if menu.lowResMode then
+        Helper.standardFontSize = 11
+        Helper.standardTextHeight = 18
+    else
+        Helper.standardFontSize = 9
+        Helper.standardTextHeight = 14
+    end
 
     menu.renderTargetWidth = Helper.standardSizeY - 30
     menu.renderTargetHeight = Helper.standardSizeY
@@ -181,6 +188,7 @@ function menu.onShowMenu()
     local usableWidth = GetUsableTableWidth(Helper.standardSizeX, menu.selectTableOffsetX, 3, true)
     local totalCommandButtonWidth = Helper.standardSizeX - menu.selectTableOffsetX
     local commandButtonWidth = usableWidth / menu.numCommandButtonCols
+    menu.commandButtonWidth = commandButtonWidth
     
     menu.selectColumnWidths = {menu.extendButtonWidth, Helper.standardTextHeight, 0, 24, 24}
     menu.gridColWidths = {menu.selectColumnWidths[1], menu.selectColumnWidths[2], 0, commandButtonWidth, commandButtonWidth}
@@ -243,6 +251,8 @@ function menu.onShowMenu()
     
     --some grid orders can be specify that they still need a target. if you click on one, its table goes here and will intercept the next right click
     menu.activeGridOrder = nil
+    
+    menu.buttonHeight = menu.lowResMode and 25 or 23
     
     menu.displayMenuRunning = false
     
@@ -309,6 +319,7 @@ function menu.onShowMenu()
     menu.activateMap = true
     
     RegisterEvent("updateHolomap", menu.updateHolomap)
+    menu.updateRegistered = true
     
     menu.shouldBeClosed = false
     
@@ -672,6 +683,7 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
     
     if updateMode and not isCommandSelection then
         rowData = menu.rowDataMap[updateRow]
+        depth = rowData.treeDepth
     end
     
     depth = depth or 0
@@ -795,7 +807,8 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
             obj = ship,
             extendButton = hasExtendButton,
             checkBox = hasCheckBox,
-            applyScriptFunction = setShipRowScripts
+            applyScriptFunction = setShipRowScripts,
+            treeDepth = depth
         }
     end
     
@@ -832,8 +845,8 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
 end
 
 local function displayStation(setup, station)
-    local fontSize = 10
-    local textHeight = 16
+    local fontSize = (not menu.lowResMode) and 10 or Helper.standardFontSize
+    local textHeight = (not menu.lowResMode) and 16 or Helper.standardTextHeight
     
     local nameUnlocked = IsInfoUnlockedForPlayer(station, "name")
     
@@ -1030,7 +1043,7 @@ local function displayCommandSelection(setup)
         end
         
         
-        local cell1Content = Helper.createButton(Helper.createButtonText("X", "center", Helper.standardFont, Helper.standardFontSize, 255, 255, 255, 100), nil, false, menu.numChecked > 0, 0, 0, 0, Helper.standardTextHeight)
+        local cell1Content = Helper.createButton(Helper.createButtonText("X", "center", Helper.standardFont, Helper.standardFontSize, 255, 255, 255, 100), nil, false, menu.numChecked > 0, 0, 0, 0, Helper.standardTextHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_RB", false))
         
         
         local iconColor = menu.numChecked > 0 and menu.holomapColor.playerColor or menu.grey
@@ -1161,10 +1174,10 @@ function menu.canViewDetails(obj)
 end
 
 function menu.createButton1()
-    return Helper.createButton(Helper.createButtonText(menu.text.back, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, true, 0, 0, menu.buttonTableButtonWidth, 23, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_B", true))
+    return Helper.createButton(Helper.createButtonText(menu.text.back, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, true, 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_B", true))
 end
 function menu.createButton2()
-    return Helper.createButton(Helper.createButtonText(menu.text.zoomOut, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, menu.currentSpaceType ~= "galaxy", 0, 0, menu.buttonTableButtonWidth, 23, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_BACK", true))
+    return Helper.createButton(Helper.createButtonText(menu.text.zoomOut, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, menu.currentSpaceType ~= "galaxy", 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_BACK", true))
 end
 function menu.createButton3()
     local text
@@ -1181,7 +1194,7 @@ function menu.createButton3()
         if hasJumpdrive then
             if nextJumpTime > GetCurTime() then
                 text = menu.text.jump
-                enabled = false
+                enabled = (not onPlatform) and C.HasPlayerJumpKickstarter()
                 
             elseif busy then
                 text = menu.text.jumping
@@ -1218,7 +1231,7 @@ function menu.createButton3()
         enabled = false
     end
     
-    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, enabled, 0, 0, menu.buttonTableButtonWidth, 23, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_Y", true))
+    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, enabled, 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_Y", true))
 end
 function menu.createButton4()
     local enabled
@@ -1236,7 +1249,7 @@ function menu.createButton4()
             enabled = menu.canViewDetails(menu.currentSelection)
         end
     end
-    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, enabled, 0, 0, menu.buttonTableButtonWidth, 23, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_X", true))
+    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, enabled, 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_X", true))
 end
 
 function menu.button1Clicked()
@@ -1282,7 +1295,8 @@ function menu.button4Clicked()
 end
 
 function menu.objectDetails()
-    Helper.closeMenuForSection(menu, false, "gMain_object_closeup", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
+    -- Helper.closeMenuForSection(menu, false, "gMain_object_closeup", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
+    Helper.closeMenuForSection(menu, false, "MeJ_OpenObjectMenu", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
     menu.cleanup()
 end
 
@@ -1375,13 +1389,17 @@ function menu.getOrderButton(order, orderObj)
     local enabled = menu.isGridButtonEnabled(order, orderObj)
     local color
     local text = order.buttonText
+    if menu.lowResMode then
+        text = TruncateText(text, Helper.standardFont, Helper.standardFontSize, menu.commandButtonWidth * 0.8)
+    end
     if menu.activeGridOrder == order then
         color = menu.holomapColor.missionColor
         text = "> " .. text .. " <"
     else
         color = menu.white
     end
-    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, color.r, color.g, color.b, 100), nil, false, enabled, nil, nil, nil, 23)
+    local height = menu.lowResMode and 25 or 23
+    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, Helper.standardFontSize, color.r, color.g, color.b, 100), nil, false, enabled, nil, nil, nil, height)
 end
 
 function menu.refreshOrderButton(order, orderObj)
@@ -1397,7 +1415,7 @@ function menu.setActiveGridOrder(newOrder)
     menu.activeGridOrder = newOrder
     
     if oldOrder ~= newOrder then
-        DebugError("Active order has changed from " .. (oldOrder and oldOrder.buttonText or "none") .. " to " .. (newOrder and newOrder.buttonText or "none"))
+        --DebugError("Active order has changed from " .. (oldOrder and oldOrder.buttonText or "none") .. " to " .. (newOrder and newOrder.buttonText or "none"))
         if oldOrder ~= nil then menu.refreshOrderButton(oldOrder, orderObj) end
         if newOrder ~= nil then menu.refreshOrderButton(newOrder, orderObj) end
     end
@@ -1441,7 +1459,8 @@ end
 function menu.displayMenu(firstTime)
     menu.displayMenuRunning = true
     
-    local gridTopRow = -1
+    local gridTopRow = 0
+    local topSelectRow = 0
     
     --remove old data
     if not firstTime then
@@ -1452,6 +1471,7 @@ function menu.displayMenu(firstTime)
         menu.rowDataMap = {}
         
         gridTopRow = GetTopRow(menu.commandGridTable)
+        topSelectRow = GetTopRow(menu.selectTable)
     end
     
     Helper.setKeyBinding(menu, menu.onHotkey)
@@ -1475,12 +1495,6 @@ function menu.displayMenu(firstTime)
     --create table for selectable ships
     --=========================================
     local setup = Helper.createTableSetup(menu)
-    
-    
-    local topSelectRow = nil
-    if not firstTime then
-        topSelectRow = GetTopRow(menu.selectTable)
-    end
     
     menu.nextSelectedRow = 0
     --if it's still available, it'll be set by a row change event
@@ -1530,6 +1544,7 @@ function menu.displayMenu(firstTime)
     
     setup = Helper.createTableSetup(menu)
     
+    --multiselect toggle button
     local toggleMultiColor
     if menu.multiSelectMode then
         toggleMultiColor = menu.holomapColor.playerColor
@@ -1541,7 +1556,6 @@ function menu.displayMenu(firstTime)
     setup:addRow(true, {
         menu.statusMessage,
         Helper.createFontString("", false, "right", 255, 255, 255, 100),
-        -- Helper.createButton(Helper.createButtonText("M", "center", Helper.standardFont, Helper.standardFontSize, 255, 255, 255, 100), nil, false, true, 0, 0, 0, Helper.standardTextHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_LB", false))
         Helper.createButton(nil, Helper.createButtonIcon("mej_multiselect", nil, toggleMultiColor.r, toggleMultiColor.g, toggleMultiColor.b, 100), false, toggleMultiEnabled, 0, 0, 0, Helper.standardTextHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_LB", false))
     }, nil, {4,4,1})
     
@@ -1568,7 +1582,7 @@ function menu.displayMenu(firstTime)
         menu.buttonTableSpacerWidth,
         menu.buttonTableButtonWidth,
         menu.buttonTableSpacerWidth
-    }, false, false, false, 2, 2, 2, Helper.standardSizeY-50, 0, false)
+    }, false, false, false, 2, 2, 2, Helper.standardSizeY-52, 0, false)
     
     --command button table
     --=========================================
@@ -1798,7 +1812,7 @@ function menu.displayChildSpaces(setup)
         if string.len(infoText) > 0 then
             textCell = textCell .. spaceAndGrey2 .. infoText
         end
-        textCell = Helper.createFontString(textCell, false, "left", nameColor.r, nameColor.g, nameColor.b, nameColor.a, nil, 9, true, nil, nil, menu.extendButtonWidth)
+        textCell = Helper.createFontString(textCell, false, "left", nameColor.r, nameColor.g, nameColor.b, nameColor.a, nil, nil, true, nil, nil, menu.extendButtonWidth)
         
         setup:addRow(true, {
             --button to go into zone
@@ -2256,10 +2270,15 @@ function menu.cleanup()
         C.RemoveHoloMap2()
         menu.holomap = 0
     end
-    UnregisterEvent("updateHolomap", menu.updateHolomap)
+    
+    if menu.updateRegistered then
+        UnregisterEvent("updateHolomap", menu.updateHolomap)
+        menu.updateRegistered = nil
+    end
     
     Helper.standardFontSize = 14
     Helper.standardTextHeight = 24
+    
     menu.shouldBeClosed = true
     UnregisterAddonBindings("ego_detailmonitor")
     
