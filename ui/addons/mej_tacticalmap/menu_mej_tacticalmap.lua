@@ -720,6 +720,9 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
     --attach a bunch of stuff to the name as needed
     local name = GetComponentData(ship, "name") or menu.text.unknown
     
+    local maxNameWidth = (Helper.standardSizeX - menu.selectTableOffsetX) * 0.6
+    name = TruncateText(name, Helper.standardFont, Helper.standardFontSize, maxNameWidth)
+    
     --a yellow something for things that can receive orders
     if isPlayer and not isCommandSelection and isCommandRecipient then
         if (menu.multiSelectMode and menu.checkedComponents[tostring(ship)]) or (not menu.multiSelectMode and IsSameComponent(menu.commandSelection, ship)) then
@@ -1295,8 +1298,7 @@ function menu.button4Clicked()
 end
 
 function menu.objectDetails()
-    -- Helper.closeMenuForSection(menu, false, "gMain_object_closeup", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
-    Helper.closeMenuForSection(menu, false, "MeJ_OpenObjectMenu", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
+    Helper.closeMenuForSubSection(menu, false, "gMain_object_closeup", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
     menu.cleanup()
 end
 
@@ -1390,7 +1392,7 @@ function menu.getOrderButton(order, orderObj)
     local color
     local text = order.buttonText
     if menu.lowResMode then
-        text = TruncateText(text, Helper.standardFont, Helper.standardFontSize, menu.commandButtonWidth * 0.8)
+        text = TruncateText(text, Helper.standardFont, Helper.standardFontSize, menu.commandButtonWidth)
     end
     if menu.activeGridOrder == order then
         color = menu.holomapColor.missionColor
@@ -1459,19 +1461,40 @@ end
 function menu.displayMenu(firstTime)
     menu.displayMenuRunning = true
     
-    local gridTopRow = 0
+    local gridTopRow
     local topSelectRow = 0
+    
+    local tabSelect = 1
+    local tabGrid = 2
+    local tabButton = 3
+    
+    local lastTableRows = Helper.currentTableRow
+    local lastTableCols = Helper.currentTableCol
     
     --remove old data
     if not firstTime then
         Helper.removeAllKeyBindings(menu)
         Helper.removeAllButtonScripts(menu)
-        Helper.currentTableRow = {}
-        Helper.currentTableRowData = nil
-        menu.rowDataMap = {}
         
         gridTopRow = GetTopRow(menu.commandGridTable)
         topSelectRow = GetTopRow(menu.selectTable)
+        
+        local inter = GetInteractiveObject(menu.frame)
+        if inter == menu.commandGridTable then
+            tabGrid = 1
+            tabButton = 2
+            tabSelect = 3
+        elseif inter == menu.buttonTable then
+            tabButton = 1
+            tabSelect = 2
+            tabGrid = 3
+        end
+        --if the select table was tabbed last time, the order is already correct
+        
+        Helper.currentTableRow = {}
+        Helper.currentTableCol = {}
+        Helper.currentTableRowData = nil
+        menu.rowDataMap = {}
     end
     
     Helper.setKeyBinding(menu, menu.onHotkey)
@@ -1537,7 +1560,7 @@ function menu.displayMenu(firstTime)
         menu.displayChildSpaces(setup)
     end
     
-    local selectDesc = setup:createCustomWidthTable({unpack(menu.selectColumnWidths)}, false, false, true, 1, fixedRows, menu.selectTableOffsetX, 0, menu.selectTableHeight, nil, topSelectRow, menu.nextSelectedRow)
+    local selectDesc = setup:createCustomWidthTable({unpack(menu.selectColumnWidths)}, false, false, true, tabSelect, fixedRows, menu.selectTableOffsetX, 0, menu.selectTableHeight, false, topSelectRow, menu.nextSelectedRow)
     
     --table for ABXY buttons
     --=========================================
@@ -1582,7 +1605,7 @@ function menu.displayMenu(firstTime)
         menu.buttonTableSpacerWidth,
         menu.buttonTableButtonWidth,
         menu.buttonTableSpacerWidth
-    }, false, false, false, 2, 2, 2, Helper.standardSizeY-52, 0, false)
+    }, false, false, false, tabButton, 2, 0, Helper.standardSizeY-52, 0, false, nil, lastTableRows[menu.buttonTable], lastTableCols[menu.buttonTable])
     
     --command button table
     --=========================================
@@ -1590,7 +1613,7 @@ function menu.displayMenu(firstTime)
     setup = Helper.createTableSetup(menu)
     menu.setupCommandGrid(setup)
     
-    local gridDesc = setup:createCustomWidthTable(clone(menu.gridColWidths), false, false, true, 3, 2, menu.selectTableOffsetX, menu.commandTableOffsetY, Helper.standardSizeY - menu.commandTableOffsetY, nil, gridTopRow ~= -1 and gridTopRow or nil)
+    local gridDesc = setup:createCustomWidthTable(clone(menu.gridColWidths), false, false, true, tabGrid, 2, menu.selectTableOffsetX, menu.commandTableOffsetY, Helper.standardSizeY - menu.commandTableOffsetY, false, gridTopRow, lastTableRows[menu.commandGridTable], lastTableCols[menu.commandGridTable])
     
     --create and display the table view
     --=========================================
@@ -1854,7 +1877,9 @@ function menu.componentSelected(rowdata, highlight)
     if not menu.mode and not menu.multiSelectMode and component ~= 0 and C.IsShip(ConvertIDTo64Bit(component)) and GetComponentData(component, "isplayerowned") then
         --don't change the command selection if it's a ship who can't receive orders
         local newSelection = getCommandRecipient(component)
-        menu.setCommandSelection(newSelection or menu.commandSelection)
+        if newSelection then
+            menu.setCommandSelection(newSelection)
+        end
         displayCommandSelection()
     end
     
@@ -1904,6 +1929,12 @@ end
 menu.updateInterval = 0.5
 function menu.onUpdate()
     menu.enforceSelections(true)
+    
+    if menu.displayMenuRunning then
+        DebugError("Tactical map: Error detected trying to display menu. Won't update")
+        menu.updateInterval = 100000
+        return
+    end
     
     --on first update call, set up the holomap
     if menu.activateMap then
