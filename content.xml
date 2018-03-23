@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="iso-8859-1"?>
-<content id="mej_tacticalmap" name="Tactical Map" description="A replacement for the map menu with improved UI and quick access to tactical commands. Has no commands built-in; use alongside a set of commands to make full use of the menu." author="MegaJohnny" version="120" date="2017-09-28" lastupdate="1428141004">
+<content id="mej_tacticalmap" name="Tactical Map" description="A replacement for the map menu with improved UI and quick access to tactical commands. Has no commands built-in; use alongside a set of commands to make full use of the menu." author="MegaJohnny" version="130" date="2018-03-23" lastupdate="1428141004">
   <text language="44" description="A replacement for the map menu with improved UI and quick access to tactical commands. Has no commands built-in; use alongside a set of commands to make full use of the menu."></text>
-  <dependency version="410"></dependency>
+  <dependency version="430"></dependency>
 </content>

@@ -165,7 +165,7 @@ end
 
 function menu.onShowMenu()
     --be a bit chunkier if the detailmonitor is small
-    menu.lowResMode = not Helper.largePDA
+    menu.lowResMode = (not Helper.largePDA) and GetFullscreenDetailmonitorOption()
     
     if menu.lowResMode then
         Helper.standardFontSize = 11

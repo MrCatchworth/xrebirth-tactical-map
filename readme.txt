@@ -30,8 +30,6 @@ Besides that, right-click and grid orders generally work as in single-select mod
 
 == Known Issues ==
 
-Going into an object's details from sector view and then back to the map makes it very zoomed in.
-
 I have a feeling something that handles the hotkeys is giving this output in the debug log:
 
 [General] 175107.07 ======================================
@@ -47,7 +45,17 @@ PLAYERCONTROLLER, priority 10
 
 I could be wrong, and it doesn't seem to affect the behaviour of the map either way. But it would be nice to get rid of some unnecessary debug log spam.
 
+Occasionally you might see this error when the menu refreshes - still trying to work out the problem. It shouldn't affect the menu's behaviour much.
+
+[General] 270105.23 ======================================
+[=ERROR=] 270105.23 Widget system error. Failed to set initial selected column. Selected-column will not be changed. Error: specified column contains a non-selectable element and hence cannot be selected
+[General] 270105.23 ======================================
+
 == Changes ==
+2018-03-23: 1.3
+    - Larger font is used for small HUD detailmonitor mode, fixes debug output produced by this (only tested on 1920x1080)
+    - In multi-select mode, the "X" button for clearing selection now has hotkey 6/RB
+    
 2017-10-09: 1.2
     - New multi-select mode
     - Ships selected for commands now have very obvious yellow arrows on the right-hand list, so they pop out a bit more
