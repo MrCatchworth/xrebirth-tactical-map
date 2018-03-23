@@ -181,7 +181,7 @@ function menu.onShowMenu()
     menu.selectTableHeight = Helper.standardSizeY - 20 - 110
     menu.commandTableOffsetY = menu.selectTableHeight
     menu.statusBarWidth = 25
-    menu.extendButtonWidth = 30
+    menu.extendButtonWidth = menu.lowResMode and (Helper.standardTextHeight * 2) or 30
     
     menu.numCommandButtonCols = 3
     local numCommandButtonRows = 10
@@ -1831,11 +1831,12 @@ function menu.displayChildSpaces(setup)
             end
         end
         
+        local textHeight = Helper.standardTextHeight * 2
         local textCell = name .. getRevealString(revealPercent)
         if string.len(infoText) > 0 then
             textCell = textCell .. spaceAndGrey2 .. infoText
         end
-        textCell = Helper.createFontString(textCell, false, "left", nameColor.r, nameColor.g, nameColor.b, nameColor.a, nil, nil, true, nil, nil, menu.extendButtonWidth)
+        textCell = Helper.createFontString(textCell, false, "left", nameColor.r, nameColor.g, nameColor.b, nameColor.a, nil, nil, true, nil, nil, textHeight)
         
         setup:addRow(true, {
             --button to go into zone
