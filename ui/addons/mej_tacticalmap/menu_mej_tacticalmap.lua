@@ -50,6 +50,7 @@ ffi.cdef[[
 	void StopRotateMap(UniverseID holomapid);
 	void ZoomMap(UniverseID holomapid, float zoomstep);
     bool IsShip(const UniverseID componentid);
+    UniverseID GetPlayerShipID(void);
 ]]
 
 local menu = {
@@ -82,7 +83,8 @@ local menu = {
         jump = ReadText(1001, 3218),
         abortJump = ReadText(1001, 3219),
         abortJump = ReadText(1001, 6),
-        successOfTotal = ReadText(30533601, 1001)
+        successOfTotal = ReadText(30533601, 1001),
+        confirm = ReadText(1001, 2821)
     }
 }
 
@@ -152,6 +154,33 @@ local function init()
             }
         )
     end
+    
+    local mapMenu
+    for _, otherMenu in pairs(Menus) do
+        if otherMenu.name == "MapMenu" then
+            mapMenu = otherMenu
+        end
+    end
+    
+    --trick the helper into thinking this is the vanilla MapMenu
+    Helper.unregisterMenu(mapMenu)
+    
+    local origCallback = menu.showMenuCallback
+    menu.showMenuCallback = function()
+        local param, param2 = GetMenuParameters()
+        if param[7] then
+            mapMenu.showMenuCallback()
+        else
+            origCallback()
+        end
+    end
+    
+    local trueName = menu.name
+    menu.name = "MapMenu"
+    
+    -- Helper.registerMenu(menu)
+    RegisterEvent("showMapMenu", menu.showMenuCallback)
+    menu.name = trueName
 end
 
 function menu.concatHistory(sep)
@@ -208,6 +237,8 @@ function menu.onShowMenu()
     
     local productionColor, buildColor, storageColor, radarColor, dronedockColor, efficiencyColor, defenceColor, playerColor, friendColor, enemyColor, missionColor = GetHoloMapColors()
     menu.holomapColor = { productionColor = productionColor, buildColor = buildColor, storageColor = storageColor, radarColor = radarColor, dronedockColor = dronedockColor, efficiencyColor = efficiencyColor, defenceColor = defenceColor, playerColor = playerColor, friendColor = friendColor, enemyColor = enemyColor, missionColor = missionColor }
+    
+    menu.holomapColor.playerShipColor = {r = 169, g = 255, b = 112, a = 100}
     
     --used to detect whether a select was made with left or right click
     menu.timeLastMouseDown = 0
@@ -310,6 +341,14 @@ function menu.onShowMenu()
         menu.currentSpace = menu.history[#menu.history].space
         menu.currentSpaceType = menu.history[#menu.history].spaceType
     end
+    
+    if menu.mode then
+        menu.modeReturnSection = menu.modeParams[1]
+    end
+    if menu.mode == "selectplayerobject" then
+        menu.disableZoom = menu.modeParams[4]
+    end
+    menu.enableCommand = not menu.mode
     
     --create child list (this actually sets up the menu)
     menu.displayMenuReason = "open menu"
@@ -709,6 +748,10 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
     local textColor
     if GetComponentData(ship, "ismissiontarget") then
         textColor = menu.holomapColor.missionColor
+    elseif (menu.mode and not menu.modeIsObjectSelectable(ship)) then
+        textColor = menu.grey
+    elseif IsSameComponent(ship, menu.playerCurrentShip) then
+        textColor = menu.holomapColor.playerShipColor
     elseif isPlayer then
         textColor = menu.holomapColor.playerColor
     elseif isEnemy then
@@ -756,8 +799,6 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
         end
     end
     
-    local commandString = IsInfoUnlockedForPlayer(ship, "operator_commands") and getCommandString(GetComponentData(ship, "pilot")) or "???"
-    
     local childSpaceType = "zone"
     if menu.currentSpaceType == "galaxy" then
         childSpaceType = "cluster"
@@ -803,7 +844,12 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
         classIconCell = Helper.createIcon(iconName, false, textColor.r, textColor.g, textColor.b, 100, 0, 0, textHeight, textHeight)
     end
     
-    local textCellString = name .. warningString .. spaceAndGrey2 .. commandString
+    local commandString = ""
+    if not menu.mode then
+        commandString = spaceAndGrey2 .. (IsInfoUnlockedForPlayer(ship, "operator_commands") and getCommandString(GetComponentData(ship, "pilot")) or "???")
+    end
+    
+    local textCellString = name .. warningString .. commandString
     
     if not updateMode and not isCommandSelection then
         rowData = {
@@ -860,6 +906,8 @@ local function displayStation(setup, station)
         textColor = menu.grey
     elseif isMissionTarget then
         textColor = menu.holomapColor.missionColor
+    elseif (menu.mode and not menu.modeIsObjectSelectable(station)) then
+        textColor = menu.grey
     elseif isPlayer then
         textColor = menu.holomapColor.playerColor
     elseif isEnemy then
@@ -1176,19 +1224,43 @@ function menu.canViewDetails(obj)
     return (IsComponentClass(obj, "ship") or IsComponentClass(obj, "station")) and IsInfoUnlockedForPlayer(obj, "name") and (CanViewLiveData(obj) or GetComponentData(obj, "tradesubscription"))
 end
 
-function menu.createButton1()
-    return Helper.createButton(Helper.createButtonText(menu.text.back, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, true, 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_B", true))
+local function createStandardButton(text, enabled, hotkey)
+    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, enabled, 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, hotkey)
 end
-function menu.createButton2()
-    return Helper.createButton(Helper.createButtonText(menu.text.zoomOut, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, menu.currentSpaceType ~= "galaxy", 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_BACK", true))
-end
-function menu.createButton3()
-    local text
-    local enabled
+
+function menu.getButton1Details()
+    local button = createStandardButton(menu.text.back, not menu.disableZoom, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_B", true))
+    local script = menu.buttonBack
     
-    if menu.currentSelection == 0 then
+    return button, script
+end
+function menu.buttonBack()
+    menu.onCloseElement("back")
+end
+
+function menu.getButton2Details()
+    local button = createStandardButton(menu.text.zoomOut, menu.currentSpaceType ~= "galaxy", Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_BACK", true))
+    local script = menu.tryZoomOut
+    
+    return button, script
+end
+
+function menu.getButton3Details()
+    local text, enabled, script
+    
+    if menu.mode == "selectposition" then
+        text = menu.text.confirm
+        enabled =
+            --first case: any space is selected
+            (menu.currentSelection ~= 0 and IsComponentClass(menu.currentSelection, "space")) or
+            --second case: in zone or sector mode, a position is highlighted on the holomap
+            ((menu.currentSpaceType == "zone" or menu.currentSpaceType == "sector") and menu.clickOffset ~= nil)
+        script = menu.buttonSelectPosition
+        
+    elseif menu.currentSelection == 0 then
         text = menu.text.comm
         enabled = false
+        script = error
         
     elseif IsComponentClass(menu.currentSelection, "gate") or IsComponentClass(menu.currentSelection, "jumpbeacon") then
         local hasJumpdrive, charging, nextJumpTime, busy = GetComponentData(GetPlayerPrimaryShipID(), "hasjumpdrive", "isjumpdrivecharging", "nextjumptime", "isjumpdrivebusy")
@@ -1215,108 +1287,159 @@ function menu.createButton3()
             text = menu.text.jump
             enabled = false
         end
-    
+        
+        script = menu.buttonJump
+        
     elseif IsComponentClass(menu.currentSelection, "zone") then
         if IsSameComponent(menu.currentSelection, GetActiveGuidanceMissionComponent()) then
             text = menu.text.abortCourse
             enabled = true
+            script = menu.buttonAbortCourse
         else
             text = menu.text.plotCourse
             enabled = not IsSameComponent(GetContextByClass(GetPlayerPrimaryShipID(), "zone"), menu.currentSelection)
+            script = menu.buttonPlotCourse
         end
     
     elseif IsComponentClass(menu.currentSelection, "container") then
         text = menu.text.comm
         enabled = not IsSameComponent(menu.currentSelection, GetPlayerPrimaryShipID())
-    
+        script = menu.buttonComm
     else
         text = menu.text.comm
         enabled = false
+        script = error
     end
     
-    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, enabled, 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_Y", true))
+    local button = createStandardButton(text, enabled, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_Y", true))
+    
+    return button, script
 end
-function menu.createButton4()
-    local enabled
-    local text
+function menu.buttonJump()
+    if GetComponentData(GetPlayerPrimaryShipID(), "isjumpdrivecharging") then
+        C.AbortPlayerPrimaryShipJump()
+    else
+        C.InitPlayerPrimaryShipJump(ConvertIDTo64Bit(menu.currentSelection))
+    end
+end
+function menu.buttonComm()
+    menu.enforceSelections(true)
+    menu.tryComm(menu.currentSelection)
+end
+function menu.buttonAbortCourse()
+    Helper.closeMenuForSection(menu, false, "gMainNav_abort_plotcourse")
+end
+function menu.buttonPlotCourse()
+    Helper.closeMenuForSection(menu, false, "gMainNav_plotcourse", {ConvertStringToLuaID(tostring(menu.currentSelection)), false})
+end
+function menu.buttonSelectPosition()
+    if menu.clickOffset or menu.currentSpaceType == "zone" then
+        local zone
+        if menu.currentSpaceType == "sector" then
+            zone = C.GetZoneAt(menu.currentSpace, menu.clickOffset)
+        else 
+            zone = menu.currentSpace
+        end
+        
+        if menu.clickOffset then
+            DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected position "..GetComponentData(ConvertStringTo64Bit(tostring(zone)), "name").." ["..menu.clickOffset.x..","..menu.clickOffset.y..","..menu.clickOffset.z.."]")
+        else
+            DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected zone "..GetComponentData(ConvertStringTo64Bit(tostring(zone)), "name").." and no selected position")
+        end
+        
+        Helper.closeMenuForSection(menu, false, menu.modeReturnSection, { 0, 0, ConvertStringToLuaID(tostring(zone)), menu.clickOffset and { menu.clickOffset.x, menu.clickOffset.y, menu.clickOffset.z } or nil })
+    else
+        DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected space " .. tostring(menu.currentSelection) .. " (" .. GetComponentData(menu.currentSelection, "name") .. ")")
+        Helper.closeMenuForSection(menu, false, menu.modeReturnSection, { 0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)) })
+    end
+end
+
+function menu.getButton4Details()
+    local text, enabled, script
     
     if menu.currentSelection == 0 then
         text = "--"
         enabled = false
-    else
-        if IsComponentClass(menu.currentSelection, "space") then
-            text = menu.text.zoomIn
-            enabled = true
-        else
-            text = menu.text.details
-            enabled = menu.canViewDetails(menu.currentSelection)
+        script = error
+        
+    elseif menu.mode == "selectzone" then
+        text = ReadText(1001, 3102)
+        enabled = menu.modeIsObjectSelectable(menu.currentSelection)
+        script = menu.modeReturnSelect
+        
+    elseif menu.mode == "selectobject" then
+        text = ReadText(1001, 3102)
+        enabled = menu.modeIsObjectSelectable(menu.currentSelection)
+        script = menu.modeReturnSelect
+        
+    elseif menu.mode == "selectplayerobject" then
+        text = ReadText(1001, 3102)
+        enabled = menu.modeIsObjectSelectable(menu.currentSelection)
+        script = menu.modeReturnSelect
+        
+    elseif IsComponentClass(menu.currentSelection, "space") then
+        text = menu.text.zoomIn
+        enabled = not menu.disableZoom
+        script = function()
+            menu.tryZoomIn(menu.currentSelection)
         end
+        
+    else
+        text = menu.text.details
+        enabled = menu.canViewDetails(menu.currentSelection)
+        script = menu.objectDetails
+        
     end
-    return Helper.createButton(Helper.createButtonText(text, "center", Helper.standardFont, 9, 255, 255, 255, 100), nil, false, enabled, 0, 0, menu.buttonTableButtonWidth, menu.buttonHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_X", true))
+    
+    local button = createStandardButton(text, enabled, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_X", true))
+    
+    return button, script
 end
 
-function menu.button1Clicked()
-    menu.onCloseElement("back")
-end
-function menu.button2Clicked()
-    menu.tryZoomOut()
-end
-function menu.button3Clicked()
-    menu.enforceSelections(true)
-    if menu.currentSelection == 0 then return end
-    
-    if IsComponentClass(menu.currentSelection, "gate") or IsComponentClass(menu.currentSelection, "jumpbeacon") then
-        if GetComponentData(GetPlayerPrimaryShipID(), "isjumpdrivecharging") then
-            C.AbortPlayerPrimaryShipJump()
-        else
-            C.InitPlayerPrimaryShipJump(ConvertIDTo64Bit(menu.currentSelection))
-        end
-        --would be better just to update button 3
-        menu.updateButtonsRow()
-    
-    elseif IsComponentClass(menu.currentSelection, "zone") then
-        if IsSameComponent(menu.currentSelection, GetActiveGuidanceMissionComponent()) then
-            Helper.closeMenuForSection(menu, false, "gMainNav_abort_plotcourse")
-            menu.cleanup()
-        else
-            Helper.closeMenuForSection(menu, false, "gMainNav_plotcourse", {ConvertStringToLuaID(tostring(menu.currentSelection)), false})
-            menu.cleanup()
-        end
-    elseif IsComponentClass(menu.currentSelection, "container") and not IsSameComponent(menu.currentSelection, GetPlayerPrimaryShipID()) then
-        menu.tryComm(menu.currentSelection)
-    end
-end
-function menu.button4Clicked()
-    menu.enforceSelections(true)
-    if menu.currentSelection == 0 then return end
-    
-    if IsComponentClass(menu.currentSelection, "space") then
-        menu.tryZoomIn()
-    elseif menu.canViewDetails(menu.currentSelection) then
-        menu.objectDetails()
-    end
+function menu.modeReturnSelect()
+    DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected object " .. tostring(menu.currentSelection) .. " (" .. GetComponentData(menu.currentSelection, "name") .. ")")
+    Helper.closeMenuForSection(menu, false, menu.modeReturnSection, { 0, 0, menu.currentSelection })
 end
 
 function menu.objectDetails()
+    menu.enforceSelections(true)
     Helper.closeMenuForSubSection(menu, false, "gMain_object_closeup", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
     menu.cleanup()
 end
 
-function menu.updateButtonsRow()
-    Helper.removeButtonScripts(menu, menu.buttonTable, 2, 2)
-    Helper.removeButtonScripts(menu, menu.buttonTable, 2, 4)
-    Helper.removeButtonScripts(menu, menu.buttonTable, 2, 6)
-    Helper.removeButtonScripts(menu, menu.buttonTable, 2, 8)
+function menu.updateButtonsRow(refresh1, refresh2, refresh3, refresh4)
+    refresh1 = (refresh1 == nil) or (refresh1 == true)
+    refresh2 = (refresh2 == nil) or (refresh2 == true)
+    refresh3 = (refresh3 == nil) or (refresh3 == true)
+    refresh4 = (refresh4 == nil) or (refresh4 == true)
     
-    SetCellContent(menu.buttonTable, menu.createButton1(), 2, 2)
-    SetCellContent(menu.buttonTable, menu.createButton2(), 2, 4)
-    SetCellContent(menu.buttonTable, menu.createButton3(), 2, 6)
-    SetCellContent(menu.buttonTable, menu.createButton4(), 2, 8)
     
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 2, menu.button1Clicked)
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 4, menu.button2Clicked)
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 6, menu.button3Clicked)
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 8, menu.button4Clicked)
+    if refresh1 then Helper.removeButtonScripts(menu, menu.buttonTable, 2, 2) end
+    if refresh2 then Helper.removeButtonScripts(menu, menu.buttonTable, 2, 4) end
+    if refresh3 then Helper.removeButtonScripts(menu, menu.buttonTable, 2, 6) end
+    if refresh4 then Helper.removeButtonScripts(menu, menu.buttonTable, 2, 8) end
+    
+    local button1, script1
+    if refresh1 then button1, script1 = menu.getButton1Details() end
+    
+    local button2, script2
+    if refresh2 then button2, script2 = menu.getButton2Details() end
+    
+    local button3, script3
+    if refresh3 then button3, script3 = menu.getButton3Details() end
+    
+    local button4, script4
+    if refresh4 then button4, script4 = menu.getButton4Details() end
+    
+    if refresh1 then SetCellContent(menu.buttonTable, button1, 2, 2) end
+    if refresh2 then SetCellContent(menu.buttonTable, button2, 2, 4) end
+    if refresh3 then SetCellContent(menu.buttonTable, button3, 2, 6) end
+    if refresh4 then SetCellContent(menu.buttonTable, button4, 2, 8) end
+    
+    if refresh1 then Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 2, script1) end
+    if refresh2 then Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 4, script2) end
+    if refresh3 then Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 6, script3) end
+    if refresh4 then Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 8, script4) end
 end
 
 function menu.tryComm(component)
@@ -1511,6 +1634,8 @@ function menu.displayMenu(firstTime)
         end
     end
     
+    menu.playerCurrentShip = ConvertStringTo64Bit(tostring(C.GetPlayerShipID()))
+    
     --create render target
     --=========================================
     local renderTargetDesc = Helper.createRenderTarget(menu.renderTargetWidth, menu.renderTargetHeight, 0, 0)
@@ -1574,7 +1699,7 @@ function menu.displayMenu(firstTime)
     else
         toggleMultiColor = menu.grey
     end
-    local toggleMultiEnabled = not menu.mode
+    local toggleMultiEnabled = menu.enableCommand
     
     setup:addRow(true, {
         menu.statusMessage,
@@ -1582,15 +1707,20 @@ function menu.displayMenu(firstTime)
         Helper.createButton(nil, Helper.createButtonIcon("mej_multiselect", nil, toggleMultiColor.r, toggleMultiColor.g, toggleMultiColor.b, 100), false, toggleMultiEnabled, 0, 0, 0, Helper.standardTextHeight, nil, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_LB", false))
     }, nil, {4,4,1})
     
+    local button1, script1 = menu.getButton1Details()
+    local button2, script2 = menu.getButton2Details()
+    local button3, script3 = menu.getButton3Details()
+    local button4, script4 = menu.getButton4Details()
+    
     setup:addSimpleRow({ 
         Helper.getEmptyCellDescriptor(),
-        menu.createButton1(),
+        button1,
         Helper.getEmptyCellDescriptor(),
-        menu.createButton2(),
+        button2,
         Helper.getEmptyCellDescriptor(),
-        menu.createButton3(),
+        button3,
         Helper.getEmptyCellDescriptor(),
-        menu.createButton4(),
+        button4,
         Helper.getEmptyCellDescriptor()
     }, nil, nil, false, menu.transparent)
     
@@ -1644,10 +1774,10 @@ function menu.displayMenu(firstTime)
     end
     
     --apply ABXY button scripts
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 2, menu.button1Clicked)
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 4, menu.button2Clicked)
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 6, menu.button3Clicked)
-    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 8, menu.button4Clicked)
+    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 2, script1)
+    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 4, script2)
+    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 6, script3)
+    Helper.setButtonScript(menu, nil, menu.buttonTable, 2, 8, script4)
     
     menu.setCommandGridScripts()
     
@@ -1875,7 +2005,7 @@ function menu.componentSelected(rowdata, highlight)
     menu.updateButtonsRow()
     
     
-    if not menu.mode and not menu.multiSelectMode and component ~= 0 and C.IsShip(ConvertIDTo64Bit(component)) and GetComponentData(component, "isplayerowned") then
+    if menu.enableCommand and not menu.multiSelectMode and component ~= 0 and C.IsShip(ConvertIDTo64Bit(component)) and GetComponentData(component, "isplayerowned") then
         --don't change the command selection if it's a ship who can't receive orders
         local newSelection = getCommandRecipient(component)
         if newSelection then
@@ -2129,14 +2259,33 @@ function menu.broadcastOrder(order, isButtonFilter)
     end
 end
 
+function menu.modeIsObjectSelectable(component)
+    if not menu.mode then
+        return true
+        
+    elseif menu.mode == "selectobject" then
+        return not GetComponentData(component, "isplayerowned")
+        
+    elseif menu.mode == "selectplayerobject" then
+        return GetComponentData(component, "isplayerowned") and Helper.checkObjectSelectConditions(component, menu.modeParams)
+        
+    elseif menu.mode == "selectzone" then
+        return IsComponentClass(component, "zone")
+        
+    elseif menu.mode == "selectposition" then
+        return IsComponentClass(component, "space")
+        
+    end
+end
+
 function menu.mapClicked(button)
     if button == "left" then
-    
+
         --left click: try to select an object or space
         local ffiPicked = C.GetPickedMapComponent(menu.holomap)
         local luaPicked = ConvertStringTo64Bit(tostring(ffiPicked))
         
-        if ffiPicked ~= 0 and C.IsComponentOperational(ffiPicked) and not IsComponentClass(luaPicked, "ship_xs") then
+        if ffiPicked ~= 0 and C.IsComponentOperational(ffiPicked) and not IsComponentClass(luaPicked, "ship_xs") and (menu.mode ~= "selectposition" or IsComponentClass(luaPicked, "space")) then
             local row = findRowForObject(luaPicked)
             if row then
                 SelectRow(menu.selectTable, row)
@@ -2146,8 +2295,15 @@ function menu.mapClicked(button)
                 menu.displayMenuReason = "left click on map"
                 menu.displayMenu()
             end
+            
+        elseif menu.mode == "selectposition" and (menu.currentSpaceType == "sector" or menu.currentSpaceType == "zone") then
+            local clickOffset = ffi.new("UIPosRot")
+            local offsetValid = C.GetMapPositionOnEcliptic(menu.holomap, clickOffset, true)
+            if offsetValid then
+                menu.clickOffset = clickOffset
+                menu.updateButtonsRow(false, false, true, false)
+            end
         end
-    
     else
     
         menu.enforceSelections()
@@ -2198,6 +2354,7 @@ function menu.zoomToSpace(space, spaceType)
         menu.pushHistory()
     end
     
+    menu.clickOffset = nil
     menu.nextSelection = ConvertStringToLuaID(tostring(prevSpace))
     menu.displayMenu(false)
     if menu.holomap ~= 0 then
@@ -2234,12 +2391,13 @@ function menu.tryZoomIn(component)
     end
     --if no component specified, see if the select table has something valid selected
     if component == nil then
-        rowData = menu.rowDataMap[Helper.currentTableRow[menu.selectTable]]
+        local rowData = menu.rowDataMap[Helper.currentTableRow[menu.selectTable]]
         if rowData ~= nil then
             component = rowData.obj
         end
     end
     if component == nil or component == 0 or not IsComponentClass(component, "space") then
+        DebugError("Can't find anything to zoom into")
         return
     end
     
@@ -2388,6 +2546,10 @@ function menu.cleanup()
     menu.displayMenuReason = nil
     
     menu.activateMap = nil
+    
+    menu.playerCurrentShip = nil
+    
+    menu.clickOffset = nil
 end
 
 init()
