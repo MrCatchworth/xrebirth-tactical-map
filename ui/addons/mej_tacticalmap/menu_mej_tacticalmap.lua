@@ -84,7 +84,8 @@ local menu = {
         abortJump = ReadText(1001, 3219),
         abortJump = ReadText(1001, 6),
         successOfTotal = ReadText(30533601, 1001),
-        confirm = ReadText(1001, 2821)
+        confirm = ReadText(1001, 2821),
+        select = ReadText(1001, 3102)
     }
 }
 
@@ -161,26 +162,28 @@ local function init()
             mapMenu = otherMenu
         end
     end
+    if mapMenu then
     
-    --trick the helper into thinking this is the vanilla MapMenu
-    Helper.unregisterMenu(mapMenu)
-    
-    local origCallback = menu.showMenuCallback
-    menu.showMenuCallback = function()
-        local param, param2 = GetMenuParameters()
-        if param[7] then
-            mapMenu.showMenuCallback()
-        else
-            origCallback()
+        --temporary testing code - show the vanilla map anyway on non-nil mode
+        --[[
+        local origShow = menu.showMenuCallback
+        function menu.showMenuCallback()
+            local param, param2 = GetMenuParameters()
+            if param[7] then
+                mapMenu.showMenuCallback()
+            else
+                origShow()
+            end
         end
+        ]]
+        
+        --register ourselves as the callback for opening MapMenu
+        Helper.unregisterMenu(mapMenu)
+        RegisterEvent("showMapMenu", menu.showMenuCallback)
+        RegisterEvent("showNonInteractiveMapMenu", menu.showNonInteractiveMenuCallback)
+    else
+        error("Tactical Map: Failed to find the vanilla MapMenu to replace!")
     end
-    
-    local trueName = menu.name
-    menu.name = "MapMenu"
-    
-    -- Helper.registerMenu(menu)
-    RegisterEvent("showMapMenu", menu.showMenuCallback)
-    menu.name = trueName
 end
 
 function menu.concatHistory(sep)
@@ -202,6 +205,12 @@ function menu.onShowMenu()
     else
         Helper.standardFontSize = 9
         Helper.standardTextHeight = 14
+    end
+    
+    if IsFullscreenWidgetSystem() then
+        menu.width, menu.height = Helper.pda_width, Helper.pda_height
+    else
+        menu.width, menu.height = GetViewSize()
     end
 
     menu.renderTargetWidth = Helper.standardSizeY - 30
@@ -278,7 +287,7 @@ function menu.onShowMenu()
     menu.multiSelectMode = false
     
     --a text message you can put above the 4 buttons if you like
-    menu.statusMessage = "Ready"
+    menu.statusMessage = ""
     
     --some grid orders can be specify that they still need a target. if you click on one, its table goes here and will intercept the next right click
     menu.activeGridOrder = nil
@@ -354,7 +363,7 @@ function menu.onShowMenu()
     menu.displayMenuReason = "open menu"
     menu.displayMenu(true)
     
-    --set the activatemap flag
+    --set up to activate the holomap on the first onUpdate call
     menu.activateMap = true
     
     RegisterEvent("updateHolomap", menu.updateHolomap)
@@ -363,6 +372,41 @@ function menu.onShowMenu()
     menu.shouldBeClosed = false
     
     RegisterAddonBindings("ego_detailmonitor")
+    
+    SetScript("onUpdate", menu.fastUpdate)
+    menu.nextFastUpdate = GetCurRealTime()
+end
+
+menu.fastUpdateInterval = 0.05
+function menu.fastUpdate()
+    local now = GetCurRealTime()
+    if now >= menu.nextFastUpdate then
+        menu.nextFastUpdate = now + menu.fastUpdateInterval
+        menu.onFastUpdate()
+    end
+end
+
+menu.fullHeightDistance = 25000
+function menu.getDragMapHeight()
+    local x, y = GetLocalMousePosition()
+    if not y then return 0 end
+    
+    local difference = y - menu.initialRelativePos
+    
+    local fracDifference = difference / menu.height
+    fracDifference = math.min(fracDifference, 1)
+    fracDifference = math.max(fracDifference, -1)
+    
+    local mapHeight = fracDifference * menu.fullHeightDistance
+    
+    return mapHeight
+end
+
+function menu.onFastUpdate()
+    if menu.offsetDragging then
+        local height = menu.getDragMapHeight()
+        menu.setStatusMessage((height > 0 and "+" or "") .. ConvertIntegerString(height, true, 2, true))
+    end
 end
 
 function menu.toggleMultiSelectMode()
@@ -1239,7 +1283,7 @@ function menu.buttonBack()
 end
 
 function menu.getButton2Details()
-    local button = createStandardButton(menu.text.zoomOut, menu.currentSpaceType ~= "galaxy", Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_BACK", true))
+    local button = createStandardButton(menu.text.zoomOut, menu.currentSpaceType ~= "galaxy" and not menu.disableZoom, Helper.createButtonHotkey("INPUT_STATE_DETAILMONITOR_BACK", true))
     local script = menu.tryZoomOut
     
     return button, script
@@ -1363,17 +1407,17 @@ function menu.getButton4Details()
         script = error
         
     elseif menu.mode == "selectzone" then
-        text = ReadText(1001, 3102)
+        text = menu.text.select
         enabled = menu.modeIsObjectSelectable(menu.currentSelection)
         script = menu.modeReturnSelect
         
     elseif menu.mode == "selectobject" then
-        text = ReadText(1001, 3102)
+        text = menu.text.select
         enabled = menu.modeIsObjectSelectable(menu.currentSelection)
         script = menu.modeReturnSelect
         
     elseif menu.mode == "selectplayerobject" then
-        text = ReadText(1001, 3102)
+        text = menu.text.select
         enabled = menu.modeIsObjectSelectable(menu.currentSelection)
         script = menu.modeReturnSelect
         
@@ -1404,7 +1448,6 @@ end
 function menu.objectDetails()
     menu.enforceSelections(true)
     Helper.closeMenuForSubSection(menu, false, "gMain_object_closeup", {0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)), menu.getMarshaledHistory()})
-    menu.cleanup()
 end
 
 function menu.updateButtonsRow(refresh1, refresh2, refresh3, refresh4)
@@ -1450,7 +1493,6 @@ function menu.tryComm(component)
     else
         Helper.closeMenuForSubSection(menu, false, "gMain_propertyResult", component)
     end
-    menu.cleanup()
 end
 
 function menu.setupCommandGrid(setup)
@@ -1761,7 +1803,6 @@ function menu.displayMenu(firstTime)
     Helper.setButtonScript(menu, nil, menu.selectTable, headerRow, 1,
         function()
             Helper.closeMenuForSubSection(menu, false, "gMain_economystats", {0, 0, ConvertStringTo64Bit(tostring(menu.currentSpace)), menu.getMarshaledHistory()})
-            menu.cleanup()
         end
     )
     
@@ -1979,6 +2020,13 @@ function menu.displayChildSpaces(setup)
             menu.nextSelectedRow = #setup.rows
         end
         
+        if menu.currentSpaceType == "sector" or menu.currentSpaceType == "cluster" then
+            local gates = GetGates(space, true)
+            for k, gate in pairs(gates) do
+                displayGate(setup, gate)
+            end
+        end
+        
         if menu.currentSpaceType == "sector" then
             for k, station in ipairs(playerStationsHere) do
                 displayStation(setup, station)
@@ -2112,11 +2160,13 @@ function menu.updateHolomap(force)
 end
 
 function menu.onRenderTargetMouseDown()
+    if menu.offsetDragging then return end
     menu.timeLastMouseDown = GetCurRealTime()
     C.StartPanMap(menu.holomap)
 end
 
 function menu.onRenderTargetMouseUp()
+    if menu.offsetDragging then return end
     C.StopPanMap(menu.holomap)
     if GetCurRealTime() < menu.timeLastMouseDown + 0.2 then
         menu.mapClicked("left")
@@ -2124,23 +2174,65 @@ function menu.onRenderTargetMouseUp()
 end
 
 function menu.onRenderTargetRightMouseDown()
+    if menu.offsetDragging then return end
     menu.timeLastRightMouseDown = GetCurRealTime()
     C.StartRotateMap(menu.holomap)
 end
 
 
 function menu.onRenderTargetRightMouseUp()
+    if menu.offsetDragging then return end
     C.StopRotateMap(menu.holomap)
     if GetCurRealTime() < menu.timeLastRightMouseDown + 0.2 then
         menu.mapClicked("right")
     end
 end
 
+function menu.onRenderTargetMiddleMouseDown()
+    if menu.currentSpaceType == "zone" then
+        local clickOffset = ffi.new("UIPosRot")
+        local offsetValid = C.GetMapPositionOnEcliptic(menu.holomap, clickOffset, false)
+        
+        if offsetValid then
+            menu.dragStartOffset = clickOffset
+            menu.offsetDragging = true
+            
+            local x, y = GetLocalMousePosition()
+            menu.initialRelativePos = y
+        end
+    end
+end
+
+function menu.onRenderTargetMiddleMouseUp()
+    if menu.offsetDragging then
+        menu.offsetDragging = nil
+        
+        local offset = menu.dragStartOffset
+        if not offset then return end
+        
+        offset.y = offset.y + menu.getDragMapHeight()
+        
+        menu.commandTarget = offset
+        menu.commandTargetType = "position"
+        
+        if menu.activeGridOrder ~= nil then
+            menu.broadcastOrder(menu.activeGridOrder)
+            if not menu.shouldBeClosed then
+                menu.setActiveGridOrder(nil)
+            end
+        else
+            menu.broadcastOrder()
+        end
+    end
+end
+
 function menu.onRenderTargetScrollDown()
+    if menu.offsetDragging then return end
     C.ZoomMap(menu.holomap, 1)
 end
 
 function menu.onRenderTargetScrollUp()
+    if menu.offsetDragging then return end
     C.ZoomMap(menu.holomap, -1)
 end
 
@@ -2238,7 +2330,6 @@ function menu.broadcastOrder(order, isButtonFilter)
         if numSuccess > 0 then
             local recipientString
             if numRecip > 1 then
-                -- recipientString = colorChar .. "Y" .. tostring(numSuccess) .. colorChar .. "X" .. " of " .. tostring(numRecip) .. ": "
                 recipientString = string.format(menu.text.successOfTotal, "\27Y" .. tostring(numSuccess) .. "\27X", tostring(numRecip)) .. ": "
             else
                 recipientString = "\27Y" .. GetComponentData(recip[1], "name") .. "\27X" .. ": "
@@ -2264,7 +2355,7 @@ function menu.modeIsObjectSelectable(component)
         return true
         
     elseif menu.mode == "selectobject" then
-        return not GetComponentData(component, "isplayerowned")
+        return IsComponentClass(component, "container") and not GetComponentData(component, "isplayerowned")
         
     elseif menu.mode == "selectplayerobject" then
         return GetComponentData(component, "isplayerowned") and Helper.checkObjectSelectConditions(component, menu.modeParams)
@@ -2355,6 +2446,12 @@ function menu.zoomToSpace(space, spaceType)
     end
     
     menu.clickOffset = nil
+    menu.dragStartOffset = nil
+    if menu.offsetDragging then
+        menu.offsetDragging = nil
+        menu.statusMessage = ""
+    end
+    
     menu.nextSelection = ConvertStringToLuaID(tostring(prevSpace))
     menu.displayMenu(false)
     if menu.holomap ~= 0 then
@@ -2417,19 +2514,38 @@ end
 
 function menu.onHotkey(action)
     menu.enforceSelections()
+    if menu.currentSelection == 0 then return end
+    
     if action == "INPUT_ACTION_ADDON_DETAILMONITOR_C" then
-        if menu.currentSelection ~= 0 then
-            menu.tryComm(menu.currentSelection)
-        end
+        menu.tryComm(menu.currentSelection)
     end
+    
     if action == "INPUT_ACTION_ADDON_DETAILMONITOR_I" then
-        if menu.currentSelection ~= 0 and menu.canViewDetails(menu.currentSelection) then
+        if menu.canViewDetails(menu.currentSelection) then
             menu.objectDetails()
         end
     end
+    
     if action == "INPUT_ACTION_ADDON_DETAILMONITOR_T" then
-        if menu.currentSelection ~= 0 then
-            menu.softTarget(menu.currentSelection)
+        menu.softTarget(menu.currentSelection)
+    end
+    
+    if action == "INPUT_ACTION_ADDON_DETAILMONITOR_A_SHIFT" then
+        if IsSameComponent(menu.currentSelection, GetAutoPilotTarget()) then
+            StopAutoPilot()
+        elseif not IsComponentClass(menu.currentSelection, "space") then
+            StartAutoPilot(menu.currentSelection)
+        else
+            PlaySound("ui_interaction_not_possible")
+        end
+    end
+    
+    if action == "INPUT_ACTION_ADDON_DETAILMONITOR_F1" then
+        C.SetPlayerCameraCockpitView(true)
+    end
+    if action == "INPUT_ACTION_ADDON_DETAILMONITOR_F3" then
+        if IsFullscreenWidgetSystem() and not IsFirstPerson() then
+            C.SetPlayerCameraTargetView(ConvertIDTo64Bit(menu.currentSelection), true)
         end
     end
 end
@@ -2442,12 +2558,18 @@ function menu.onCloseElement(dueToClose)
     if dueToClose == "close" then
         PlaySound("ui_menu_close")
         Helper.closeMenuAndCancel(menu)
-        menu.cleanup()
     else
+        --use 1/ESC as a way to cancel middle-mouse dragging
+        if menu.offsetDragging then
+            menu.offsetDragging = nil
+            menu.dragStartOffset = nil
+            menu.setStatusMessage("")
+            return
+        end
+        
         if #menu.history <= 1 then
             PlaySound("ui_menu_close")
             Helper.closeMenuAndReturn(menu)
-            menu.cleanup()
         else
             local prevHistory = menu.history[#menu.history - 1]
             menu.zoomToSpace(prevHistory.space, prevHistory.spaceType)
@@ -2466,11 +2588,18 @@ function menu.cleanup()
         menu.updateRegistered = nil
     end
     
+    RemoveScript("onUpdate", menu.fastUpdate)
+    
     Helper.standardFontSize = 14
     Helper.standardTextHeight = 24
     
     menu.shouldBeClosed = true
     UnregisterAddonBindings("ego_detailmonitor")
+    
+    menu.width = nil
+    menu.height = nil
+    
+    menu.activateMap = nil
     
     menu.currentSelection = nil
     menu.commandTarget = nil
@@ -2511,6 +2640,7 @@ function menu.cleanup()
     menu.timeLastRightMouseDown = nil
     
     menu.currentSelection = nil
+    menu.nextSelection = nil
     
     menu.commandSelection = nil
     menu.commandSelectionTable = nil
@@ -2518,38 +2648,36 @@ function menu.cleanup()
     menu.commandTargetType = nil
     menu.commandSelectionRow = nil
     
-    menu.lastHolomapUpdate = nil
-    
-    menu.nextSelection = nil
-    
-    menu.ignoreSelectRowChange = nil
-    
-    menu.nextSelectedRow = nil
-    
-    menu.extendedObjects = nil
-    
-    menu.nextUpdateQuickly = nil
-    
     menu.checkedComponents = nil
     menu.numChecked = nil
     menu.multiSelectMode = nil
     
-    menu.statusMessage = nil
-    
     menu.activeGridOrder = nil
+    
+    menu.lastHolomapUpdate = nil
+    
+    menu.ignoreSelectRowChange = nil
+    menu.nextSelectedRow = nil
+    menu.extendedObjects = nil
+    
+    menu.nextUpdateQuickly = nil
+    menu.displayMenuReason = nil
+    
+    menu.statusMessage = nil
     
     menu.displayMenuRunning = nil
     
     menu.mode = nil
     menu.modeParams = nil
+    menu.disableZoom = nil
     
-    menu.displayMenuReason = nil
-    
-    menu.activateMap = nil
+    menu.clickOffset = nil
+    menu.dragStartOffset = nil
+    menu.offsetDragging = nil
     
     menu.playerCurrentShip = nil
     
-    menu.clickOffset = nil
+    menu.nextFastUpdate = nil
 end
 
 init()
