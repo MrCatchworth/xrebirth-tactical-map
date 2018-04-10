@@ -51,6 +51,7 @@ ffi.cdef[[
 	void ZoomMap(UniverseID holomapid, float zoomstep);
     bool IsShip(const UniverseID componentid);
     UniverseID GetPlayerShipID(void);
+    double GetCurrentGameTime(void);
 ]]
 
 local menu = {
@@ -85,7 +86,8 @@ local menu = {
         abortJump = ReadText(1001, 6),
         successOfTotal = ReadText(30533601, 1001),
         confirm = ReadText(1001, 2821),
-        select = ReadText(1001, 3102)
+        select = ReadText(1001, 3102),
+        unitMetres = " " .. ReadText(1001, 107)
     }
 }
 
@@ -160,6 +162,7 @@ local function init()
     for _, otherMenu in pairs(Menus) do
         if otherMenu.name == "MapMenu" then
             mapMenu = otherMenu
+            break
         end
     end
     if mapMenu then
@@ -299,6 +302,8 @@ function menu.onShowMenu()
     --set some button scripts we don't have to mess with
     for k, order in ipairs(menu.gridOrders) do
         order.buttonScript = function()
+            menu.pauseUpdate = nil
+            
             if menu.activeGridOrder == order then
                 menu.setActiveGridOrder(nil)
                 return
@@ -405,7 +410,7 @@ end
 function menu.onFastUpdate()
     if menu.offsetDragging then
         local height = menu.getDragMapHeight()
-        menu.setStatusMessage((height > 0 and "+" or "") .. ConvertIntegerString(height, true, 2, true))
+        menu.setStatusMessage((height > 0 and "+" or "") .. ConvertIntegerString(height, true, 2, true) .. menu.text.unitMetres)
     end
 end
 
@@ -1108,7 +1113,13 @@ local function displayCommandSelection(setup)
     if menu.multiSelectMode then
         selectionChanged = menu.prevNumChecked ~= menu.numChecked
     else
-        selectionChanged = (menu.prevCommandSelection == 0) and (menu.commandSelection ~= 0) or (not IsSameComponent(menu.prevCommandSelection, menu.commandSelection))
+        if menu.commandSelection == 0 then
+            selectionChanged = menu.prevCommandSelection ~= 0
+        elseif menu.prevCommandSelection == 0 then
+            selectionChanged = menu.commandSelection ~= 0
+        else
+            selectionChanged = not IsSameComponent(menu.prevCommandSelection, menu.commandSelection)
+        end
     end
     
     if menu.multiSelectMode then
@@ -1170,7 +1181,9 @@ local function displayCommandSelection(setup)
         end
         
     elseif menu.commandSelection ~= 0 then
-        displayShip(setup, menu.commandSelection, true, true, false, menu.commandGridTable, menu.commandSelectionRow)
+        if createMode or selectionChanged then
+            displayShip(setup, menu.commandSelection, true, true, false, menu.commandGridTable, menu.commandSelectionRow)
+        end
         
         if not createMode then
             local currentRow = findRowForObject(menu.commandSelection)
@@ -1406,10 +1419,18 @@ function menu.getButton4Details()
         enabled = false
         script = error
         
-    elseif menu.mode == "selectzone" then
-        text = menu.text.select
-        enabled = menu.modeIsObjectSelectable(menu.currentSelection)
-        script = menu.modeReturnSelect
+    elseif IsComponentClass(menu.currentSelection, "space") then
+        if menu.mode == "selectzone" and IsComponentClass(menu.currentSelection, "zone") then
+            text = menu.text.select
+            enabled = menu.modeIsObjectSelectable(menu.currentSelection)
+            script = menu.modeReturnSelect
+        else
+            text = menu.text.zoomIn
+            enabled = not menu.disableZoom
+            script = function()
+                menu.tryZoomIn(menu.currentSelection)
+            end
+        end
         
     elseif menu.mode == "selectobject" then
         text = menu.text.select
@@ -1420,13 +1441,6 @@ function menu.getButton4Details()
         text = menu.text.select
         enabled = menu.modeIsObjectSelectable(menu.currentSelection)
         script = menu.modeReturnSelect
-        
-    elseif IsComponentClass(menu.currentSelection, "space") then
-        text = menu.text.zoomIn
-        enabled = not menu.disableZoom
-        script = function()
-            menu.tryZoomIn(menu.currentSelection)
-        end
         
     else
         text = menu.text.details
@@ -1709,10 +1723,13 @@ function menu.displayMenu(firstTime)
         headerText = spaceType .. ": " .. ffi.string(C.GetComponentName(menu.currentSpace))
     end
     
+    local titleFontSize = 16
+    
     --name of zone/sector/cluster/galaxy
     setup:addSimpleRow({
         Helper.createButton(nil, Helper.createButtonIcon("menu_stats", nil, 255, 255, 255, 100), false, PlayerPrimaryShipHasContents("economymk1")),
-        Helper.createFontString(headerText, false, "left", 255, 255, 255, 100, Helper.headerRow1Font, Helper.headerRow1FontSize, false, Helper.headerRow1Offsetx, Helper.headerRow1Offsety, Helper.headerRow1Height, Helper.headerRow1Width)
+        -- Helper.createFontString(headerText, false, "left", 255, 255, 255, 100, Helper.headerRow1Font, Helper.headerRow1FontSize, false, Helper.headerRow1Offsetx, Helper.headerRow1Offsety, Helper.headerRow1Height, Helper.headerRow1Width)
+        Helper.createFontString(headerText, false, "left", 255, 255, 255, 100, Helper.headerRow1Font, titleFontSize, false, Helper.headerRow1Offsetx, Helper.headerRow1Offsety, Helper.headerRow1Height)
     }, nil, {2, #menu.selectColumnWidths - 2}, false, Helper.defaultTitleBackgroundColor)
     local headerRow = #setup.rows
     
@@ -1962,6 +1979,10 @@ function menu.displayChildSpaces(setup)
         local name, shortName, isMissionTarget, revealPercent = GetComponentData(space, "name", "mapshortname", "ismissiontarget", "revealpercent")
         name = shortNameHere .. shortName .. ": " .. name
         
+        --try to avoid stuff going onto a new line
+        local maxNameWidth = (Helper.standardSizeX - menu.selectTableOffsetX) * 0.6
+        name = TruncateText(name, Helper.standardFont, Helper.standardFontSize, maxNameWidth)
+        
         local nameColor = menu.white
         local playerShipsHere = GetContainedShipsByOwner("player", space)
         --filterByDisplayable(playerShipsHere, childSpaceType)
@@ -2041,6 +2062,14 @@ function menu.displayChildSpaces(setup)
     end
 end
 
+function menu.setHighlight(component, resetPan)
+    if (menu.currentSpaceType ~= "zone" and not IsComponentClass(menu.currentSelection, "space")) then
+        C.SetHighlightMapComponent(menu.holomap, ConvertIDTo64Bit(GetContextByClass(component, "zone")), resetPan)
+    else
+        C.SetHighlightMapComponent(menu.holomap, ConvertIDTo64Bit(component), resetPan)
+    end
+end
+
 function menu.componentSelected(rowdata, highlight)
     if not rowdata then
         return
@@ -2064,11 +2093,7 @@ function menu.componentSelected(rowdata, highlight)
     
     --ships and stuff really mustn't be highlighted when the holomap isn't in zone mode, it clearly wasn't made for it and looks very screwy, so we prevent it
     if menu.holomap ~= 0 and menu.currentSelection ~= 0 and highlight then
-        if (menu.currentSpaceType ~= "zone" and not IsComponentClass(menu.currentSelection, "space")) then
-            C.SetHighlightMapComponent(menu.holomap, ConvertIDTo64Bit(GetContextByClass(component, "zone")), false)
-        else
-            C.SetHighlightMapComponent(menu.holomap, ConvertIDTo64Bit(component), false)
-        end
+        menu.setHighlight(component, false)
     end
 end
 
@@ -2128,7 +2153,7 @@ function menu.onUpdate()
             if menu.holomap ~= 0 then
                 C.ShowUniverseMap(menu.holomap, menu.currentSpace, true, 0)
                 if menu.currentSelection ~= 0 then
-                    C.SetHighlightMapComponent(menu.holomap, ConvertIDTo64Bit(menu.currentSelection), true)
+                    menu.setHighlight(menu.currentSelection, true)
                 end
             end
         end
@@ -2147,7 +2172,7 @@ menu.holomapUpdateInterval = 3
 function menu.updateHolomap(force)
     local curTime = GetCurRealTime()
     
-    if curTime > menu.lastHolomapUpdate + menu.holomapUpdateInterval then
+    if (not menu.pauseUpdate) and curTime > menu.lastHolomapUpdate + menu.holomapUpdateInterval then
         menu.lastHolomapUpdate = curTime
         
         menu.nextSelection = menu.currentSelection
@@ -2189,9 +2214,9 @@ function menu.onRenderTargetRightMouseUp()
 end
 
 function menu.onRenderTargetMiddleMouseDown()
-    if menu.currentSpaceType == "zone" then
+    if menu.hasCommandRecipient() and menu.currentSpaceType == "zone" then
         local clickOffset = ffi.new("UIPosRot")
-        local offsetValid = C.GetMapPositionOnEcliptic(menu.holomap, clickOffset, false)
+        local offsetValid = C.GetMapPositionOnEcliptic(menu.holomap, clickOffset, true)
         
         if offsetValid then
             menu.dragStartOffset = clickOffset
@@ -2254,9 +2279,9 @@ end
 
 --for when something is double clicked by either table or map
 function menu.onItemDoubleClick(component)
-    if menu.currentSpaceType == "zone" then
+    if IsComponentClass(component, "container") then
         menu.softTarget(component)
-    elseif menu.currentSpaceType == "sector" or menu.currentSpaceType == "cluster" or menu.currentSpaceType == "galaxy" then
+    elseif IsComponentClass(component, "space") then
         menu.tryZoomIn(component)
     end
 end
@@ -2678,6 +2703,7 @@ function menu.cleanup()
     menu.playerCurrentShip = nil
     
     menu.nextFastUpdate = nil
+    menu.pauseUpdate = nil
 end
 
 init()
