@@ -87,9 +87,41 @@ local menu = {
         successOfTotal = ReadText(30533601, 1001),
         confirm = ReadText(1001, 2821),
         select = ReadText(1001, 3102),
-        unitMetres = " " .. ReadText(1001, 107)
-    }
+        unitMetres = " " .. ReadText(1001, 107),
+        shipyard = ReadText(1001, 92),
+        jumpBeacon = ReadText(20109, 2101),
+        esc = ReadText(1001, 3209)
+    },
+    
+    coloredYields = {}
 }
+
+local function firstLetterColored(s, color)
+    return "\27" .. color .. string.sub(s, 1, 1) .. "\27Z" .. string.sub(s, 2)
+end
+
+--color first letter of "Shipyard" and "Jump Beacon" in a language-agnostic way
+--end with grey2, not default colour, because this is part of some grey info-text
+menu.text.shipyard = "\27Y" .. string.sub(menu.text.shipyard, 1, 1) .. "\27Z" .. string.sub(menu.text.shipyard, 2)
+menu.text.jumpBeacon = "\27C" .. string.sub(menu.text.jumpBeacon, 1, 1) .. "\27Z" .. string.sub(menu.text.jumpBeacon, 2)
+menu.text.esc = string.sub(menu.text.esc, 1, 1) .. "\27W" .. string.sub(menu.text.esc, 2, 2) .. "\27Z" .. string.sub(menu.text.esc, 3)
+
+--[[
+local coloredYieldWares = {
+    ions = "M",
+    plasma = "B",
+    hydrogen = "U",
+    ore = "R",
+    silicon = "Y",
+    crystals = "G",
+    nividium = "C",
+    ice = "W"
+}
+for ware, color in pairs(coloredYieldWares) do
+    -- menu.coloredYields[ware] = firstLetterColored(GetWareData(ware, "shortname"), color)
+    menu.coloredYields[ware] = "\27" .. color .. GetWareData(ware, "shortname") .. "\27Z"
+end
+]]
 
 --shallow clone
 local function clone(t)
@@ -600,49 +632,69 @@ end
 --helper function to get the highest commander in the chain that isn't the skunk
 --(because orderable ships are either subordinate to the skunk or subordinate to nobody)
 local function getCommandRecipient(component)
+    local comm
+    
+    --can't order playership or non-ship
     if IsSameComponent(component, GetPlayerPrimaryShipID()) then
         return nil
     end
     if not IsComponentClass(component, "ship") then
         return nil
     end
-    if GetBuildAnchor(component) then
-        return nil
-    end
-    if not GetCommander(component) then
-        if GetComponentData(component, "pilot") then
-            return component
-        else
-            return nil
-        end
-    end
     
-    local commandChain = GetAllCommanders(component)
-    local comm
-    
-    --find the top of the command chain - might still be not a valid command receiver!
-    if #commandChain == 1 then
-        if IsSameComponent(commandChain[1], GetPlayerPrimaryShipID()) then
-            --direct subordinate to skunk, i can receive orders
-            comm = component
+    comm = GetCommander(component)
+    if comm then
+        local commandChain = GetAllCommanders(component)
+        
+        --find the top of the command chain - might still be not a valid command receiver!
+        if #commandChain == 1 then
+            if IsSameComponent(commandChain[1], GetPlayerPrimaryShipID()) then
+                --direct subordinate to skunk, i can receive orders
+                comm = component
+            else
+                --direct subordinate to someone who can receive orders
+                comm = commandChain[1]
+            end
         else
-            --direct subordinate to someone who can receive orders
-            comm = commandChain[1]
+            if IsSameComponent(commandChain[#commandChain], GetPlayerPrimaryShipID()) then
+                --skunk is at the top, next one down can receive orders
+                comm = commandChain[#commandChain-1]
+            else
+                --someone who can receive orders is at the top
+                comm = commandChain[#commandChain]
+            end
         end
     else
-        if IsSameComponent(commandChain[#commandChain], GetPlayerPrimaryShipID()) then
-            --skunk is at the top, next one down can receive orders
-            comm = commandChain[#commandChain-1]
-        else
-            --someone who can receive orders is at the top
-            comm = commandChain[#commandChain]
-        end
+        comm = component
     end
+    
+    -- no way to give orders to a ship assigned to a station
     if IsComponentClass(comm, "station") then
-        --no way to give orders to a ship assigned to a station
         return nil
     end
-    if not GetComponentData(comm, "pilot") then
+    
+    -- can't order a ship that's building something (only necessarily true for CVs but ok)
+    if GetBuildAnchor(comm) then
+        return nil
+    end
+    
+    -- can't order a ship which is docked or docking
+    local isDocked, isDocking = GetComponentData(comm, "isdocked", "isdocking")
+    if isDocked or isDocking then
+        return nil
+    end
+    
+    local commPilot = GetComponentData(comm, "pilot")
+    
+    -- can't order a ship with no pilot
+    if not commPilot then
+        return nil
+    end
+    
+    -- can't order a ship docking for build operation, or parking for trade operation
+    local pilotShiptraderDocking = GetNPCBlackboard(commPilot, "$shiptrader_docking")
+    local pilotShipParking = GetNPCBlackboard(commPilot, "$ship_parking")
+    if pilotShiptraderDocking or pilotShipParking then
         return nil
     end
     
@@ -1399,14 +1451,14 @@ function menu.buttonSelectPosition()
         end
         
         if menu.clickOffset then
-            DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected position "..GetComponentData(ConvertStringTo64Bit(tostring(zone)), "name").." ["..menu.clickOffset.x..","..menu.clickOffset.y..","..menu.clickOffset.z.."]")
+            -- DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected position "..GetComponentData(ConvertStringTo64Bit(tostring(zone)), "name").." ["..menu.clickOffset.x..","..menu.clickOffset.y..","..menu.clickOffset.z.."]")
         else
-            DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected zone "..GetComponentData(ConvertStringTo64Bit(tostring(zone)), "name").." and no selected position")
+            -- DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected zone "..GetComponentData(ConvertStringTo64Bit(tostring(zone)), "name").." and no selected position")
         end
         
         Helper.closeMenuForSection(menu, false, menu.modeReturnSection, { 0, 0, ConvertStringToLuaID(tostring(zone)), menu.clickOffset and { menu.clickOffset.x, menu.clickOffset.y, menu.clickOffset.z } or nil })
     else
-        DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected space " .. tostring(menu.currentSelection) .. " (" .. GetComponentData(menu.currentSelection, "name") .. ")")
+        -- DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected space " .. tostring(menu.currentSelection) .. " (" .. GetComponentData(menu.currentSelection, "name") .. ")")
         Helper.closeMenuForSection(menu, false, menu.modeReturnSection, { 0, 0, ConvertStringToLuaID(tostring(menu.currentSelection)) })
     end
 end
@@ -1455,7 +1507,7 @@ function menu.getButton4Details()
 end
 
 function menu.modeReturnSelect()
-    DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected object " .. tostring(menu.currentSelection) .. " (" .. GetComponentData(menu.currentSelection, "name") .. ")")
+    -- DebugError("Returning from mode " .. menu.mode .. " to section '" .. menu.modeReturnSection .. "' with selected object " .. tostring(menu.currentSelection) .. " (" .. GetComponentData(menu.currentSelection, "name") .. ")")
     Helper.closeMenuForSection(menu, false, menu.modeReturnSection, { 0, 0, menu.currentSelection })
 end
 
@@ -1999,15 +2051,15 @@ function menu.displayChildSpaces(setup)
         local infoText = ""
         
         if (childSpaceType == "sector" or childSpaceType == "zone") and HasShipyard(space) then
-            infoText = infoText .. " [" .. ReadText(1001, 92) .. "]"
+            infoText = infoText .. " [" .. menu.text.shipyard .. "]"
         end
         
         if childSpaceType == "zone" and GetComponentData(space, "hasjumpbeacon") then
-            infoText = infoText .. " [" .. ReadText(20109, 2101) .. "]"
+            infoText = infoText .. " [" .. menu.text.jumpBeacon .. "]"
         end
         
         if IsSameComponent(space, topHistory) then
-            infoText = infoText .. " " .. ReadText(1001, 3209)
+            infoText = infoText .. " " .. menu.text.esc
         end
         
         if childSpaceType == "zone" then
@@ -2018,7 +2070,9 @@ function menu.displayChildSpaces(setup)
                     if i > 1 then
                         infoText = infoText .. ", "
                     end
-                    infoText = infoText .. GetWareData(yield.ware, "shortname")
+                    local yieldText = menu.coloredYields[yield.ware] or GetWareData(yield.ware, "shortname")
+                    infoText = infoText .. yieldText
+                    -- infoText = infoText .. GetWareData(yield.ware, "shortname")
                 end
             end
         end
@@ -2519,7 +2573,7 @@ function menu.tryZoomIn(component)
         end
     end
     if component == nil or component == 0 or not IsComponentClass(component, "space") then
-        DebugError("Can't find anything to zoom into")
+        -- DebugError("Can't find anything to zoom into")
         return
     end
     
