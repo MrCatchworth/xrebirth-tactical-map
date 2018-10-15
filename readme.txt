@@ -2,48 +2,44 @@
 Author: MegaJohnny
 Egosoft Forums Thread: https://forum.egosoft.com/viewtopic.php?t=396379
 
-Requires the Sidebar Extender.
+This mod replaces the map menu with a new one. There are many new features to command your ships easily without leaving the map menu, and many UI additions to make it prettier and more informative.
 
-This mod adds a new menu to the game which replicates many of the behaviours of the vanilla map, but adds some new ones besides. Most importantly, you can select your ships on this map and right-click on the holomap, and a command will be issued based on the context. For example, clicking on a point in space issues "Fly to Position", clicking on an enemy issues "Attack Object", and so on. For less "obvious" commands a grid of buttons on the bottom right is used to make them available.
+This mod doesn't have any commands built-in, but instead it can load commands in using a system similar to Sidebar Extender. Make sure you download the Vanilla Commands companion as well, which adds a lot of vanilla commands to Tactical Map.
 
-This mod does not come with any commands of its own, but instead has the capability to load commands in from other mods (see readme_api.txt). Keeping the two separate makes it easier to accommodate full overhauls of the player-owned ship AI where the normal command signals may be interpreted differently or be ignored entirely. Unless you're using one of these, you'll probably want to download the Vanilla Commands addon to make full use of this mod.
-
-My ultimate goal is to replace the vanilla map menu in every use-case, but there are still some holes to be plugged. Known missing things are:
-- Jumpdrive does not respect kickstarter item
-- No support for different modes of operation
-
-However, enough is working that I've decided to have it replace the vanilla map in the normal mode. Dot and comma open the tactical map now, as do the buttons on property/object menus. However the vanilla map will open when you are being asked to select a zone, player object, etc.
+Tactical Map includes all the important features of the vanilla map, and many of the minor ones, but a couple of small things might still remain - if you see anything missing, get in touch at the forum thread above!
 
 
 == Usage ==
 
-Most things are similar to the vanilla map, but just above the command buttons on the bottom right is a row which shows you the current "command selection". The ship that will receive commands is different from the one that is highlighted on the right-hand list, because not every ship you select is able to receive a command. In the usual AI, only ships which are in your squad or have no commander can become the command selection. These are marked on the right-hand list with a yellow ">" before the name. Selecting any other player-owned ship will have the map scan the command tree that ship is in, and set the command selection to the ship at the top, if it's eligible. Once set, a ship remains the command selection until you set a new one or it becomes ineligible (probably by being blown up).
+Tactical Map behaves like the vanilla map for general usage. Its defining addition is its command system, which lets you select ships on the map and issue commands to them with a simple mouse-based interface. We'll go through the different aspects of that.
 
-When you have a command selection showing on the right, right-clicking anywhere on the map will try to issue an appropriate command to the command selection based on the context. More specifically, it will look through all the available commands and try to find any applicable ones. The "throttle set to full forward" sound will play, and the command with the highest priority will be issued. If there's no applicable right-click commands, a "not possible" sound will play instead.
+= Selecting Ships =
 
-The bottom-right command buttons are used for commands that don't fit into the usual right-click. Some commands don't require a target (such as "Hold Position") and will be issued as soon as you press the button. Others, such as "Patrol", do need a target/destination. In this case, when you press the button, it will be highlighted until you give a target for it by right-clicking. While a grid command is highlighted, the normal right-click behaviour is suppressed. You can click the same button again to cancel it, instead of giving a target, if you like.
+Tactical Map keeps track of which ship(s) you have selected for giving commands (the "command selection"), which is displayed underneath the object list, on the right. Any ship which can receive commands is marked with a yellow ">" by its name, and when you click on it, it becomes the command selection until it's destroyed or you select something else. The command selection is sticky and stays when you zoom in or out.
 
-The above describes the menu's single-select mode. As of 1.2 an optional multi-select mode can be used to have multiple ships in the command-selection and issue commands to all of them at once. To toggle between single-select and multi-select, click the small button with a fleet icon just above the ABXY buttons on the holomap (or press 5 on your keyboard). In multi-select mode the command selection is displayed instead as breakdown of the size classes of the selected ships (S, M, L, XL). Commandable ships on the right-hand list have checkboxes instead of icons, and you select/deselect them using these checkboxes. You can also use the "X" button on the command-selection display to clear the command-selection.
+You can go into a multi-select mode to easily broadcast orders to multiple ships at once. To toggle it, click the button on the bottom right of the holomap, or press 5. In multi-select mode each commandable ship has a checkbox you can use to add or remove it from the command selection. You can use the X button on the command selection, or press 6, to clear the selection in multi-select mode. Be aware that some commands can't be given when you have multiple ships selected.
 
-Besides that, right-click and grid orders generally work as in single-select mode. More specifically, right-click orders are determined individually for each selected ship (which might be two different things depending on what commands are installed), and grid buttons are only available if /all/ selected ships are valid. Additionally, some commands simply don't make sense to be issued to multiple ships - for example if they open another menu. In this case the commands just won't be available at all in multi-select mode.
+= Right Click Commands =
 
+When you have a command selection, you can right click on the holomap to give a command based on what you clicked and what your command selection is. In multi-select mode it's possible some ships are valid for this command and some aren't. This is for quick access to simple commands like "fly to this point", "attack this enemy", "stop current task" and so on.
+
+= Grid Commands =
+
+Extra commands can be found in the button grid underneath the object list. There are three different types of grid command:
+
+- Commands which don't require a target, and are given as soon as you press the button.
+- Commands which do require a target - the button becomes highlighted when you click on it, and then your next right click is used to provide a target for the command.
+- Commands which go to a different menu.
+
+Grid commands are greyed out when they can't be used currently.
+
+= Middle Click =
+
+You can also middle click on the holomap to give a "fly to position" command. This is different from right click in that it will only ever select a position, never an object. This is handy if you want to send a ship very close to a station.
+
+Additionally, by dragging the mouse up and down when you middle click, you can set a vertical offset which the command selection will fly to. This can't be displayed on the map due to a technical limitation, but you can see the offset in metres on the bottom left while dragging.
 
 == Known Issues ==
-
-I have a feeling something that handles the hotkeys is giving this output in the debug log:
-
-[General] 175107.07 ======================================
-[=ERROR=] 175107.07 [InputMapper::AddContextRequest] There is already a ContextR
-equest for Context INPUT_CONTEXT_COMM_ACTION, Requester INPUT_CONTEXT_REQUESTER_
-PLAYERCONTROLLER, priority 10
-[General] 175107.07 ======================================
-[General] 175107.07 ======================================
-[=ERROR=] 175107.07 [InputMapper::AddContextRequest] There is already a ContextR
-equest for Context INPUT_CONTEXT_INFO_ACTION, Requester INPUT_CONTEXT_REQUESTER_
-PLAYERCONTROLLER, priority 10
-[General] 175107.07 ======================================
-
-I could be wrong, and it doesn't seem to affect the behaviour of the map either way. But it would be nice to get rid of some unnecessary debug log spam.
 
 Occasionally you might see this error when the menu refreshes - still trying to work out the problem. It shouldn't affect the menu's behaviour much.
 
@@ -52,6 +48,27 @@ Occasionally you might see this error when the menu refreshes - still trying to 
 [General] 270105.23 ======================================
 
 == Changes ==
+2018-10-15: 1.5
+Major Changes:
+    - Switch to a pure-Lua way of replacing the vanilla map, removing the save-game dependency
+    - Add support for selection modes, and replace the vanilla map for selection modes
+        - In a selection mode, invalid choices on the object list are grey
+        - Command functionality is completely disabled when in a selection mode
+    - Add middle click as a way to give orders
+        - Middle click only works in zone or sector mode, and selects a position for giving a command, ignoring any objects under the mouse
+        - Handy for telling ships to go somewhere when a station or ship is in the way
+        - Keep the middle mouse button held down and drag the mouse up and down to specify a vertical offset from the ecliptic
+        - The vertical offset, when middle mouse dragging, is shown over the holomap
+    - Station sequences and modules are in from the vanilla map
+        - Modules are ordered by their module type (production, storage, etc)
+        - Each sequence has its letter code (A, B, C, ...) on display as well as its current stage
+        - Module types have their own little icon - any replacements would be gratefully accepted!
+
+Minor Changes:
+    - Display the player's current ship (Skunk or docked capital) in a different colour
+    - Gates are displayed under their zone/sector in the appropriate view
+    - Implement the vanilla Shift+A, F1 and F3 hotkeys
+
 2018-03-23: 1.3
     - Larger font is used for small HUD detailmonitor mode, fixes debug output produced by this (only tested on 1920x1080)
     - In multi-select mode, the "X" button for clearing selection now has hotkey 6/RB
