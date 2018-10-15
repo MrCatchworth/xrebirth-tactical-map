@@ -90,38 +90,18 @@ local menu = {
         unitMetres = " " .. ReadText(1001, 107),
         shipyard = ReadText(1001, 92),
         jumpBeacon = ReadText(20109, 2101),
-        esc = ReadText(1001, 3209)
+        esc = ReadText(1001, 3209),
+        qmarks = ReadText(1001, 3210)
     },
     
     coloredYields = {}
 }
-
-local function firstLetterColored(s, color)
-    return "\27" .. color .. string.sub(s, 1, 1) .. "\27Z" .. string.sub(s, 2)
-end
 
 --color first letter of "Shipyard" and "Jump Beacon" in a language-agnostic way
 --end with grey2, not default colour, because this is part of some grey info-text
 menu.text.shipyard = "\27Y" .. string.sub(menu.text.shipyard, 1, 1) .. "\27Z" .. string.sub(menu.text.shipyard, 2)
 menu.text.jumpBeacon = "\27C" .. string.sub(menu.text.jumpBeacon, 1, 1) .. "\27Z" .. string.sub(menu.text.jumpBeacon, 2)
 menu.text.esc = string.sub(menu.text.esc, 1, 1) .. "\27W" .. string.sub(menu.text.esc, 2, 2) .. "\27Z" .. string.sub(menu.text.esc, 3)
-
---[[
-local coloredYieldWares = {
-    ions = "M",
-    plasma = "B",
-    hydrogen = "U",
-    ore = "R",
-    silicon = "Y",
-    crystals = "G",
-    nividium = "C",
-    ice = "W"
-}
-for ware, color in pairs(coloredYieldWares) do
-    -- menu.coloredYields[ware] = firstLetterColored(GetWareData(ware, "shortname"), color)
-    menu.coloredYields[ware] = "\27" .. color .. GetWareData(ware, "shortname") .. "\27Z"
-end
-]]
 
 --shallow clone
 local function clone(t)
@@ -131,8 +111,6 @@ local function clone(t)
     end
     return new
 end
-
-local colorChar = string.char(27)
 
 local function loadOrdersFromExtensions()
     local extensions = GetExtensionList()
@@ -216,6 +194,9 @@ local function init()
         Helper.unregisterMenu(mapMenu)
         RegisterEvent("showMapMenu", menu.showMenuCallback)
         RegisterEvent("showNonInteractiveMapMenu", menu.showNonInteractiveMenuCallback)
+        
+        RegisterEvent("showVanillaMapMenu", mapMenu.showMenuCallback)
+        RegisterEvent("showNonInteractiveVanillaMapMenu", mapMenu.showNonInteractiveMenuCallback)
     else
         error("Tactical Map: Failed to find the vanilla MapMenu to replace!")
     end
@@ -302,7 +283,7 @@ function menu.onShowMenu()
     menu.lastHolomapUpdate = GetCurRealTime() + menu.holomapUpdateInterval
     
     --mapClicked uses this to tell displayMenu what should be selected in the menu
-    menu.nextSelection = 0
+    menu.nextSelection = {}
     
     --the next n row changes on selectTable will have no effect
     menu.ignoreSelectRowChange = 0
@@ -311,6 +292,8 @@ function menu.onShowMenu()
     
     menu.extendedObjects = {}
     menu.extend(GetPlayerPrimaryShipID())
+    
+    menu.extendedSequences = {}
     
     --when you don't want to wait for updateHolomap to be called naturally
     --eg an order was issued and you want to update quickly, but not so quickly the command doesn't update on the UI
@@ -360,7 +343,7 @@ function menu.onShowMenu()
         
         menu.currentSpace = ConvertIDTo64Bit(paramSource[4])
         menu.currentSpaceType = paramSource[3]
-        menu.nextSelection = paramSource[6] or 0
+        menu.nextSelection = paramSource[6] and {rowType = "object", obj = paramSource[6]} or {}
         menu.mode = paramSource[7]
         menu.modeParams = paramSource[8] or {}
         
@@ -373,8 +356,8 @@ function menu.onShowMenu()
             })
         end
         
-        if paramSource == menu.param and menu.param2 and menu.nextSelection == 0 then
-			menu.nextSelection = menu.param2[2] or 0
+        if paramSource == menu.param and menu.param2 and not menu.nextSelection.obj then
+			menu.nextSelection = menu.param2[2] and {rowType = "object", obj = menu.param2[2]} or {}
 		end
     else
         menu.history = {}
@@ -412,6 +395,12 @@ function menu.onShowMenu()
     
     SetScript("onUpdate", menu.fastUpdate)
     menu.nextFastUpdate = GetCurRealTime()
+end
+
+local function nextSelectionObjectMatch(setup, obj)
+    if menu.nextSelection.obj and IsSameComponent(obj, menu.nextSelection.obj) then
+        menu.nextSelectedRow = #setup.rows
+    end
 end
 
 menu.fastUpdateInterval = 0.05
@@ -483,7 +472,7 @@ end
 
 local function findRowForObject(object)
     for row, data in pairs(menu.rowDataMap) do
-        if data and IsSameComponent(data.obj, object) then
+        if data and data.obj and IsSameComponent(data.obj, object) then
             return row
         end
     end
@@ -810,7 +799,6 @@ local function getRevealString(percent)
     return " \27A(" .. tostring(percent) .. "%)"
 end
 
-local spaceAndGrey2 = " \27Z"
 local commandShipPrefix = "\27Y> \27X"
 local commandSelPrefix = "\27Y>>>> \27X"
 local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, updateTable, updateRow, depth)
@@ -947,7 +935,7 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
     
     local commandString = ""
     if not menu.mode then
-        commandString = spaceAndGrey2 .. (IsInfoUnlockedForPlayer(ship, "operator_commands") and getCommandString(GetComponentData(ship, "pilot")) or "???")
+        commandString = " \27Z" .. (IsInfoUnlockedForPlayer(ship, "operator_commands") and getCommandString(GetComponentData(ship, "pilot")) or menu.text.qmarks)
     end
     
     local textCellString = name .. warningString .. commandString
@@ -981,8 +969,8 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
         }, rowData, {1, 1, 3})
     end
     
-    if not isCommandSelection and not updateMode and IsSameComponent(ship, menu.nextSelection) then
-        menu.nextSelectedRow = #setup.rows
+    if not isCommandSelection and not updateMode then
+        nextSelectionObjectMatch(setup, ship)
     end
     
     --if we are extended, display all our subordinates as well
@@ -992,6 +980,220 @@ local function displayShip(setup, ship, isCommandSelection, isPlayer, isEnemy, u
             displayShip(setup, sub, nil, nil, nil, nil, nil, depth+1)
         end
     end
+end
+
+function menu.isSequenceExtended(station, sequence)
+    local extendEntry = menu.extendedSequences[tostring(station)]
+    return extendEntry and extendEntry[sequence]
+end
+
+function menu.extendSequence(station, sequence)
+    local extendEntry = menu.extendedSequences[tostring(station)]
+    
+    if extendEntry then
+        extendEntry[sequence] = true
+    else
+        menu.extendedSequences[tostring(station)] = {[sequence] = true}
+    end
+end
+
+function menu.collapseSequence(station, sequence)
+    local extendEntry = menu.extendedSequences[tostring(station)]
+    if extendEntry then
+        extendEntry[sequence] = nil
+        if not next(extendEntry) then
+            menu.extendedSequences[tostring(station)] = nil
+        end
+    end
+end
+
+function menu.extendSequenceButton(station, sequence)
+    if menu.isSequenceExtended(station, sequence) then
+        menu.collapseSequence(station, sequence)
+    else
+        menu.extendSequence(station, sequence)
+    end
+    menu.nextSelection = {station = station, sequence = sequence}
+    if not menu.displayMenuRunning then
+        menu.displayMenuReason = "extend sequence button"
+        menu.displayMenu()
+    end
+end
+
+local function setSequenceRowScripts(row, data)
+    Helper.setButtonScript(menu, nil, menu.selectTable, row, 1, function() menu.extendSequenceButton(data.station, data.sequence) end)
+end
+
+local moduleTypeOrdering = {
+    ["moduletypes_build"] = 1,
+    ["moduletypes_production"] = 2,
+    ["moduletypes_storage"] = 3,
+    ["moduletypes_communication"] = 4,
+    ["moduletypes_efficiency"] = 5,
+    ["moduletypes_dronedock"] = 6,
+    ["moduletypes_defence"] = 7
+}
+    
+local function displaySequence(setup, station, seqInfo)
+    --collect all modules for the sequence together, because we need the summarised information
+    local sequenceModules = {}
+    local numOperational = 0
+    local numProduction = 0
+    local numBuild = 0
+    local numStorage = 0
+    local numRadar = 0
+    local numDroneDock = 0
+    local numEfficiency = 0
+    local numDefence = 0
+    
+    local mainModuleName
+    
+    local totalRevealPercent = 0
+    
+    local modulesByStage = {}
+    
+    for stageNum = (seqInfo.sequence == "a" and 0 or 1), seqInfo.currentstage do
+        local realSequence = stageNum == 0 and "" or seqInfo.sequence
+        local modules = GetBuildStageModules(station, realSequence, stageNum)
+        local stageModules = {}
+        table.insert(modulesByStage, stageModules)
+        for k, module in ipairs(modules) do
+            if IsComponentOperational(module.component) then
+                table.insert(sequenceModules, module)
+                table.insert(stageModules, module)
+                
+                numOperational = numOperational + 1
+                if module.library == "moduletypes_build" then
+                    numBuild = numBuild + 1
+                    if not mainModuleName then mainModuleName = module.name end
+                elseif module.library == "moduletypes_production" then
+                    numProduction = numProduction + 1
+                    if not mainModuleName then mainModuleName = module.name end
+                elseif module.library == "moduletypes_storage" then
+                    numStorage = numStorage + 1
+                elseif module.library == "moduletypes_communication" then
+                    numRadar = numRadar + 1
+                elseif module.library == "moduletypes_dronedock" then
+                    numDroneDock = numDroneDock + 1
+                elseif module.library == "moduletypes_efficiency" then
+                    numEfficiency = numEfficiency + 1
+                elseif module.library == "moduletypes_defence" then
+                    numDefence = numDefence + 1
+                end
+                
+                module.revealPercent = GetComponentData(module.component, "revealpercent")
+                totalRevealPercent = totalRevealPercent + module.revealPercent
+                
+                module.stage = stageNum
+            end
+        end
+    end
+    
+    local sequenceRevealPercent = math.floor(totalRevealPercent / #sequenceModules)
+    
+    local sequenceName
+    local sequenceColor
+    if sequenceRevealPercent == 0 then
+        sequenceName = menu.text.qmarks
+        sequenceColor = menu.grey
+    elseif numOperational == 0 then
+        sequenceName = "  --- " .. ReadText(1001, 3217) .. " ---"
+        sequenceColor = menu.lightGrey
+    elseif numBuild > 0 then
+        sequenceName = mainModuleName
+        sequenceColor = menu.holomapColor.buildColor
+    elseif numProduction > 0 then
+        sequenceName = mainModuleName
+        sequenceColor = menu.holomapColor.productionColor
+    elseif numStorage > 0 then
+        sequenceName = ReadText(1001, 1400)
+        sequenceColor = menu.holomapColor.storageColor
+    elseif numRadar > 0 then
+        sequenceName = ReadText(1001, 1706)
+        sequenceColor = menu.holomapColor.radarColor
+    elseif numDroneDock > 0 then
+        sequenceName = ReadText(1001, 1707)
+        sequenceColor = menu.holomapColor.dronedockColor
+    else
+        sequenceName = ReadText(1001, 1310)
+        sequenceColor = menu.holomapColor.efficiencyColor
+    end
+    
+    local rowData = {
+        station = station,
+        sequence = seqInfo.sequence,
+        applyScriptFunction = setSequenceRowScripts
+    }
+    local isExtended = menu.isSequenceExtended(station, seqInfo.sequence)
+    
+    local extendButtonCell = Helper.createButton(Helper.createButtonText(isExtended and "-" or "+", "center", Helper.standardFont, Helper.standardFontSize, 255, 255, 255, 100), nil, false, true, 0, 0, 0, Helper.standardTextHeight)
+
+    local seqDisplayId = seqInfo.sequence == "" and "A" or string.upper(seqInfo.sequence)
+    local textCell = Helper.createFontString("    \27W" .. seqDisplayId .. " -- Stage " .. seqInfo.currentstage .. ":\27X " .. sequenceName .. getRevealString(sequenceRevealPercent), false, "left", sequenceColor.r, sequenceColor.g, sequenceColor.b, 100, nil, nil, nil, nil, nil, nil)
+    
+    setup:addRow(true, {extendButtonCell, "", textCell}, rowData, {1, 1, 3})
+    
+    if menu.nextSelection.sequence == seqInfo.sequence and IsSameComponent(station, menu.nextSelection.station) then
+        menu.nextSelectedRow = #setup.rows
+    end
+    
+    if isExtended then
+        for k, stage in ipairs(modulesByStage) do
+            table.sort(stage, function(a, b)
+                return moduleTypeOrdering[a.library] < moduleTypeOrdering[b.library]
+            end)
+            if k ~= 1 then
+                setup:addHeaderRow({Helper.createFontString("", nil, nil, nil, nil, nil, nil, nil, 6, nil, nil, nil, 6)}, nil, {#menu.selectColumnWidths})
+            end
+            for j, module in ipairs(stage) do
+                local isKnown = IsInfoUnlockedForPlayer(module.component, "name")
+                local isSelectable = not (menu.mode and not menu.modeIsObjectSelectable(module.component))
+                
+                local moduleColor
+                local moduleIcon
+                if (not isKnown or not isSelectable) then
+                    moduleColor = menu.grey
+                elseif module.library == "moduletypes_production" then
+                    moduleColor = menu.holomapColor.productionColor
+                    moduleIcon = "mej_production"
+                elseif module.library == "moduletypes_build" then
+                    moduleColor = menu.holomapColor.buildColor
+                    moduleIcon = "mej_buildmodule"
+                elseif module.library == "moduletypes_storage" then
+                    moduleColor = menu.holomapColor.storageColor
+                    moduleIcon = "mej_storage"
+                elseif module.library == "moduletypes_communication" then
+                    moduleColor = menu.holomapColor.radarColor
+                    moduleIcon = "mej_radar"
+                elseif module.library == "moduletypes_dronedock" then
+                    moduleColor = menu.holomapColor.dronedockColor
+                    moduleIcon = "mej_dronedock"
+                elseif module.library == "moduletypes_efficiency" then
+                    moduleColor = menu.holomapColor.efficiencyColor
+                    moduleIcon = "mej_efficiency"
+                elseif module.library == "moduletypes_defence" then
+                    moduleColor = menu.red
+                    moduleIcon = "mej_defence"
+                end
+                
+                local moduleName = Helper.unlockInfo(isKnown, module.name .. getRevealString(module.revealPercent))
+                moduleName = "        " .. applyTargetArrows(setup, module.component, moduleName)
+                
+                local moduleRowData = {
+                    obj = module.component
+                }
+                local moduleIconCell = Helper.createIcon(moduleIcon or "workshop_error", false, moduleColor.r, moduleColor.g, moduleColor.b, 100, 0, 0, Helper.standardTextHeight, Helper.standardTextHeight)
+                local moduleNameCell = Helper.createFontString(moduleName, false, "left", moduleColor.r, moduleColor.g, moduleColor.b, 100, nil, nil, nil, nil, nil, nil)
+                setup:addRow(true, {"", moduleIconCell, moduleNameCell}, moduleRowData, {1, 1, 3})
+                
+                nextSelectionObjectMatch(setup, module.component)
+            end
+        end
+    end
+end
+
+local function setStationRowScripts(row, data)
+    Helper.setButtonScript(menu, nil, menu.selectTable, row, 1, function() menu.extendObjectButton(data.obj) end)
 end
 
 local function displayStation(setup, station)
@@ -1017,10 +1219,13 @@ local function displayStation(setup, station)
         textColor = menu.holomapColor.friendColor
     end
     
+    local isExtended = menu.isExtended(station)
+    
     local rowData = {
         obj = station,
-        extendButton = false,
-        checkBox = false
+        extendButton = true,
+        checkBox = false,
+        applyScriptFunction = setStationRowScripts
     }
     
     local numIcons = 0
@@ -1032,7 +1237,7 @@ local function displayStation(setup, station)
         numIcons = numIcons + 1
     end
     
-    local extendButtonCell = ""
+    local extendButtonCell = Helper.createButton(Helper.createButtonText(isExtended and "-" or "+", "center", Helper.standardFont, Helper.standardFontSize, 255, 255, 255, 100), nil, false, true, 0, 0, 0, textHeight)
     
     local classIcon = Helper.createIcon("mej_station", false, textColor.r, textColor.g, textColor.b, 100, 0, 0, Helper.standardTextHeight, Helper.standardTextHeight)
     
@@ -1040,7 +1245,7 @@ local function displayStation(setup, station)
     if nameUnlocked then
         name = GetComponentData(station, "name") .. getRevealString(revealPercent)
     else
-        name = "???"
+        name = menu.text.qmarks
     end
     
     local nameCell = Helper.createFontString(name, false, "left", textColor.r, textColor.g, textColor.b, 100, nil, fontSize, nil, nil, nil, textHeight)
@@ -1074,8 +1279,16 @@ local function displayStation(setup, station)
     setup:addRow(true, cellContents, rowData, colSpans)
     
     
-    if IsSameComponent(station, menu.nextSelection) then
-        menu.nextSelectedRow = #setup.rows
+    nextSelectionObjectMatch(setup, station)
+    
+    if isExtended then
+        local buildTree = GetBuildTree(station)
+        table.sort(buildTree, function(a, b) return a.name < b.name end)
+        for k, seqInfo in ipairs(buildTree) do
+            if seqInfo.currentstage > 0 then
+                displaySequence(setup, station, seqInfo)
+            end
+        end
     end
 end
 
@@ -1112,9 +1325,7 @@ local function displayGate(setup, gate)
         Helper.createFontString(name, false, "left", textColor.r, textColor.g, textColor.b, 100, nil, Helper.standardFontSize, nil, nil, nil, Helper.standardTextHeight),
     }, rowData, {1, 1, 3})
     
-    if IsSameComponent(gate, menu.nextSelection) then
-        menu.nextSelectedRow = #setup.rows
-    end
+    nextSelectionObjectMatch(setup, gate)
 end
 
 local function displayBeacon(setup, beacon)
@@ -1139,9 +1350,7 @@ local function displayBeacon(setup, beacon)
         Helper.createFontString(name, false, "left", textColor.r, textColor.g, textColor.b, 100, nil, Helper.standardFontSize, nil, nil, nil, Helper.standardTextHeight),
     }, rowData, {1, 1, 3})
     
-    if IsSameComponent(beacon, menu.nextSelection) then
-        menu.nextSelectedRow = #setup.rows
-    end
+    nextSelectionObjectMatch(setup, beacon)
 end
 
 function menu.clearSelectionClicked()
@@ -1291,8 +1500,8 @@ function menu.enforceSelections(noCommandUpdate)
     if menu.currentSelection ~= 0 and not IsComponentOperational(menu.currentSelection) then
         menu.currentSelection = 0
     end
-    if menu.nextSelection ~= 0 and not IsComponentOperational(menu.nextSelection) then
-        menu.nextSelection = 0
+    if menu.nextSelection.obj and not IsComponentOperational(menu.nextSelection.obj) then
+        menu.nextSelection = {}
     end
     
     if menu.multiSelectMode then
@@ -1322,7 +1531,7 @@ function menu.extendObjectButton(ship)
     else
         menu.extend(ship)
     end
-    menu.nextSelection = ship
+    menu.nextSelection = {rowType = "object", obj = ship}
     if not menu.displayMenuRunning then
         menu.displayMenuReason = "extend object button"
         menu.displayMenu()
@@ -1330,7 +1539,7 @@ function menu.extendObjectButton(ship)
 end
 
 function menu.canViewDetails(obj)
-    return (IsComponentClass(obj, "ship") or IsComponentClass(obj, "station")) and IsInfoUnlockedForPlayer(obj, "name") and (CanViewLiveData(obj) or GetComponentData(obj, "tradesubscription"))
+    return (IsComponentClass(obj, "ship") or IsComponentClass(obj, "station") or GetContextByClass(obj, "station", true)) and IsInfoUnlockedForPlayer(obj, "name") and (CanViewLiveData(obj) or GetComponentData(obj, "tradesubscription"))
 end
 
 local function createStandardButton(text, enabled, hotkey)
@@ -1654,7 +1863,6 @@ function menu.setActiveGridOrder(newOrder)
     end
 end
 
-local globalOrderObj = {}
 function menu.getOrderObject(noTarget)
     menu.enforceSelections()
     newObj = {}
@@ -1736,8 +1944,8 @@ function menu.displayMenu(firstTime)
     menu.enforceSelections(true)
     
     --selected object might not have a row because its commanders aren't extended
-    if menu.nextSelection ~= 0 and C.IsShip(ConvertIDTo64Bit(menu.nextSelection)) and GetCommander(menu.nextSelection) then
-        for k, com in pairs(GetAllCommanders(menu.nextSelection)) do
+    if menu.nextSelection.obj and C.IsShip(ConvertIDTo64Bit(menu.nextSelection.obj)) and GetCommander(menu.nextSelection.obj) then
+        for k, com in pairs(GetAllCommanders(menu.nextSelection.obj)) do
             menu.extend(com)
         end
     end
@@ -2080,7 +2288,7 @@ function menu.displayChildSpaces(setup)
         local textHeight = Helper.standardTextHeight * 2
         local textCell = name .. getRevealString(revealPercent)
         if string.len(infoText) > 0 then
-            textCell = textCell .. spaceAndGrey2 .. infoText
+            textCell = textCell .. " \27Z" .. infoText
         end
         textCell = Helper.createFontString(textCell, false, "left", nameColor.r, nameColor.g, nameColor.b, nameColor.a, nil, nil, true, nil, nil, textHeight)
         
@@ -2091,9 +2299,7 @@ function menu.displayChildSpaces(setup)
             textCell,
         }, rowData, {1,4})
         
-        if IsSameComponent(space, menu.nextSelection) then
-            menu.nextSelectedRow = #setup.rows
-        end
+        nextSelectionObjectMatch(setup, space)
         
         if menu.currentSpaceType == "sector" or menu.currentSpaceType == "cluster" then
             local gates = GetGates(space, true)
@@ -2124,12 +2330,12 @@ function menu.setHighlight(component, resetPan)
     end
 end
 
-function menu.componentSelected(rowdata, highlight)
-    if not rowdata then
+function menu.componentSelected(rowData, highlight)
+    if not rowData then
         return
     end
     
-    local component = rowdata.obj
+    local component = rowData.obj or 0
     
     menu.currentSelection = component
     Helper.updateCellText(menu.buttonTable, 1, 5, getComponentInfo(menu.currentSelection))
@@ -2176,7 +2382,7 @@ function menu.softTarget(obj)
     end
     
     if C.SetSofttarget(ffiObj) then
-        menu.nextSelection = obj
+        menu.nextSelection = {rowType = "object", obj = obj}
         if not menu.displayMenuRunning then
             menu.displayMenuReason = "new soft target"
             menu.displayMenu()
@@ -2229,7 +2435,16 @@ function menu.updateHolomap(force)
     if (not menu.pauseUpdate) and curTime > menu.lastHolomapUpdate + menu.holomapUpdateInterval then
         menu.lastHolomapUpdate = curTime
         
-        menu.nextSelection = menu.currentSelection
+        local rowData = menu.rowDataMap[Helper.currentTableRow[menu.selectTable]]
+        if rowData then
+            if rowData.obj then
+                menu.nextSelection = {rowType = "object", obj = rowData.obj}
+            elseif rowData.sequence then
+                menu.nextSelection = {rowType = "sequence", station = rowData.station, sequence = rowData.sequence}
+            end
+        else
+            menu.nextSelection = {}
+        end
         
         if not menu.displayMenuRunning then
             menu.displayMenuReason = "holo map update"
@@ -2317,7 +2532,7 @@ end
 
 function menu.onSelectElement(tab)
     local rowData = menu.rowDataMap[Helper.currentTableRow[menu.selectTable]]
-    if rowData ~= nil then
+    if rowData ~= nil and rowData.obj ~= nil then
         menu.onItemDoubleClick(rowData.obj)
     end
 end
@@ -2434,7 +2649,7 @@ function menu.modeIsObjectSelectable(component)
         return true
         
     elseif menu.mode == "selectobject" then
-        return IsComponentClass(component, "container") and not GetComponentData(component, "isplayerowned")
+        return (IsComponentClass(component, "container") or GetContextByClass(component, "station", false)) and not GetComponentData(component, "isplayerowned")
         
     elseif menu.mode == "selectplayerobject" then
         return GetComponentData(component, "isplayerowned") and Helper.checkObjectSelectConditions(component, menu.modeParams)
@@ -2461,7 +2676,7 @@ function menu.mapClicked(button)
                 SelectRow(menu.selectTable, row)
             else
                 --Maybe the ship just entered view, but the list doesn't reflect this yet, or the ship is a subordinate of a collapsed commander
-                menu.nextSelection = luaPicked
+                menu.nextSelection = {rowType = "object", obj = luaPicked}
                 menu.displayMenuReason = "left click on map"
                 menu.displayMenu()
             end
@@ -2531,7 +2746,7 @@ function menu.zoomToSpace(space, spaceType)
         menu.statusMessage = ""
     end
     
-    menu.nextSelection = ConvertStringToLuaID(tostring(prevSpace))
+    menu.nextSelection = {rowType = "object", obj = ConvertStringToLuaID(tostring(prevSpace))}
     menu.displayMenu(false)
     if menu.holomap ~= 0 then
         C.ClearHighlightMapComponent(menu.holomap)
@@ -2568,7 +2783,7 @@ function menu.tryZoomIn(component)
     --if no component specified, see if the select table has something valid selected
     if component == nil then
         local rowData = menu.rowDataMap[Helper.currentTableRow[menu.selectTable]]
-        if rowData ~= nil then
+        if rowData ~= nil and rowData.obj ~= nil then
             component = rowData.obj
         end
     end
@@ -2681,8 +2896,13 @@ function menu.cleanup()
     menu.activateMap = nil
     
     menu.currentSelection = nil
-    menu.commandTarget = nil
     menu.nextSelection = nil
+    
+    menu.commandSelection = nil
+    menu.commandSelectionTable = nil
+    menu.commandTarget = nil
+    menu.commandTargetType = nil
+    menu.commandSelectionRow = nil
     
     menu.currentSpace = nil
     menu.currentSpaceType = nil
@@ -2718,15 +2938,6 @@ function menu.cleanup()
     menu.timeLastMouseDown = nil
     menu.timeLastRightMouseDown = nil
     
-    menu.currentSelection = nil
-    menu.nextSelection = nil
-    
-    menu.commandSelection = nil
-    menu.commandSelectionTable = nil
-    menu.commandTarget = nil
-    menu.commandTargetType = nil
-    menu.commandSelectionRow = nil
-    
     menu.checkedComponents = nil
     menu.numChecked = nil
     menu.multiSelectMode = nil
@@ -2738,6 +2949,7 @@ function menu.cleanup()
     menu.ignoreSelectRowChange = nil
     menu.nextSelectedRow = nil
     menu.extendedObjects = nil
+    menu.extendedSequences = nil
     
     menu.nextUpdateQuickly = nil
     menu.displayMenuReason = nil

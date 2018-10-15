@@ -59,4 +59,26 @@
     <add sel="/icons">
         <icon name="mej_multiselect" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\shipicon\mej_multiselect.tga" height="32" width="32"></icon>
     </add>
+    
+    <add sel="/icons">
+        <icon name="mej_buildmodule" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\mej_tacticalmap\buildmodule.tga" height="32" width="32"></icon>
+    </add>
+    <add sel="/icons">
+        <icon name="mej_production" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\mej_tacticalmap\production.tga" height="32" width="32"></icon>
+    </add>
+    <add sel="/icons">
+        <icon name="mej_storage" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\mej_tacticalmap\storage.tga" height="32" width="32"></icon>
+    </add>
+    <add sel="/icons">
+        <icon name="mej_radar" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\mej_tacticalmap\radar.tga" height="32" width="32"></icon>
+    </add>
+    <add sel="/icons">
+        <icon name="mej_efficiency" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\mej_tacticalmap\efficiency.tga" height="32" width="32"></icon>
+    </add>
+    <add sel="/icons">
+        <icon name="mej_defence" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\mej_tacticalmap\defence.tga" height="32" width="32"></icon>
+    </add>
+    <add sel="/icons">
+        <icon name="mej_dronedock" texture="extensions\mej_tacticalmap\assets\fx\gui\textures\mej_tacticalmap\dronedock.tga" height="32" width="32"></icon>
+    </add>
 </diff>
